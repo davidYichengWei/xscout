@@ -3,8 +3,9 @@ import { enableEnvProxy } from "./net.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AGENT_IDS, claudeConfigFile, installAgent, serverSpec, type AgentId } from "./agents.ts";
+import { AGENT_IDS, claudeConfigFile, installAgent, MCP_SERVER_NAME, serverSpec, type AgentId } from "./agents.ts";
 import {
+  appHome,
   configPath,
   DEFAULT_NTFY_SERVER,
   loadConfig,
@@ -12,7 +13,6 @@ import {
   requireConfig,
   saveStoredConfig,
   VERSION,
-  xscoutHome,
   type Transport,
 } from "./config.ts";
 import { checkNtfyServer } from "./ntfy.ts";
@@ -54,23 +54,23 @@ function parseArgs(args: string[]) {
 const str = (v: string | true | undefined) => (typeof v === "string" ? v : undefined);
 const num = (v: string | true | undefined) => (typeof v === "string" ? Number(v) : undefined);
 
-const HELP = `xscout ${VERSION}: search X from any coding agent through your Grok Bot.
+const HELP = `x-via-grokbot ${VERSION}: search X from any coding agent through your Grok Bot.
 
 Setup
-  xscout config --webhook-url <url> [--transport ntfy|github] [--ntfy-server https://ntfy.sh]
-                [--repo <owner/name>] [--branch main] [--results-dir results]   (GitHub transport)
-  xscout secret set <webhook-secret|github-read-token> [--from-file <file>]   (else reads stdin)
-  xscout secret status
-  xscout secret keygen | seal <name> --pubkey <file> | unseal <name> <ciphertext>   (move a secret between machines)
-  xscout routine [--print]          Render the routine instructions (and a chat message that creates the routine)
-  xscout install-agents [--only claude,codex,cursor,antigravity] [--no-proxy] [--dry-run]
-  xscout doctor                     Check configuration, secrets and GitHub access
+  x-via-grokbot config --webhook-url <url> [--transport ntfy|github] [--ntfy-server https://ntfy.sh]
+                       [--repo <owner/name>] [--branch main] [--results-dir results]   (GitHub transport)
+  x-via-grokbot secret set <webhook-secret|github-read-token> [--from-file <file>]   (else reads stdin)
+  x-via-grokbot secret status
+  x-via-grokbot secret keygen | seal <name> --pubkey <file> | unseal <name> <ciphertext>   (move a secret between machines)
+  x-via-grokbot routine [--print]          Render the routine instructions (and a chat message that creates the routine)
+  x-via-grokbot install-agents [--only claude,codex,cursor,antigravity] [--no-proxy] [--dry-run]
+  x-via-grokbot doctor                     Check configuration, secrets, transport and agent registrations
 
 Use
-  xscout ask "<question>" [--wait 300] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--max-posts 15] [--json]
-  xscout result <run_id> [--wait 120] [--json]
-  xscout recent [--limit 10]
-  xscout mcp-spec                   Print the MCP server command for manual configuration
+  x-via-grokbot ask "<question>" [--wait 300] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--max-posts 15] [--json]
+  x-via-grokbot result <run_id> [--wait 120] [--json]
+  x-via-grokbot recent [--limit 10]
+  x-via-grokbot mcp-spec                   Print the MCP server command for manual configuration
 `;
 
 async function readStdin(): Promise<string> {
@@ -114,7 +114,7 @@ async function doctor(): Promise<number> {
     } else if (cfg.githubRepo && token) {
       const info = await getRepoInfo(cfg as ReturnType<typeof requireConfig>, token);
       info.private ? ok(`${info.fullName} reachable and private`) : (failures++, bad(`${info.fullName} is PUBLIC: make it private`));
-      if (info.defaultBranch !== cfg.githubBranch) bad(`default branch is "${info.defaultBranch}" but xscout uses "${cfg.githubBranch}"`);
+      if (info.defaultBranch !== cfg.githubBranch) bad(`default branch is "${info.defaultBranch}" but x-via-grokbot uses "${cfg.githubBranch}"`);
     } else bad("skipped (needs githubRepo and github-read-token)");
   } catch (err) {
     failures++;
@@ -129,8 +129,8 @@ async function doctor(): Promise<number> {
     ["antigravity", join(homedir(), ".gemini", "config", "mcp_config.json")],
   ];
   for (const [id, file] of checks) {
-    const has = existsSync(file) && /xscout/.test(readFileSync(file, "utf8"));
-    has ? ok(`${id}: xscout registered`) : bad(`${id}: not registered (xscout install-agents --only ${id})`);
+    const has = existsSync(file) && readFileSync(file, "utf8").includes(MCP_SERVER_NAME);
+    has ? ok(`${id}: ${MCP_SERVER_NAME} registered`) : bad(`${id}: not registered (x-via-grokbot install-agents --only ${id})`);
   }
   console.log(failures ? `\n${failures} problem(s) found.` : "\nAll required checks passed.");
   return failures ? 1 : 0;
@@ -178,7 +178,7 @@ async function main(): Promise<number> {
       }
       if (sub === "seal" && name && isSecretName(name)) {
         const pub = str(flags.pubkey);
-        if (!pub) throw new Error("usage: xscout secret seal <name> --pubkey <file>");
+        if (!pub) throw new Error("usage: x-via-grokbot secret seal <name> --pubkey <file>");
         console.log(sealSecret(name, readFileSync(pub, "utf8")));
         return 0;
       }
@@ -188,7 +188,7 @@ async function main(): Promise<number> {
         return 0;
       }
       if (sub !== "set" || !name || !isSecretName(name)) {
-        console.error(`usage: xscout secret set <${SECRET_NAMES.join("|")}> [--from-file <file>]`);
+        console.error(`usage: x-via-grokbot secret set <${SECRET_NAMES.join("|")}> [--from-file <file>]`);
         return 2;
       }
       const file = str(flags["from-file"]);
@@ -200,7 +200,7 @@ async function main(): Promise<number> {
 
     case "routine": {
       const cfg = loadConfig();
-      if (cfg.transport === "github" && !cfg.githubRepo) throw new Error("Set the repo first: xscout config --repo <owner/name>");
+      if (cfg.transport === "github" && !cfg.githubRepo) throw new Error("Set the repo first: x-via-grokbot config --repo <owner/name>");
       const vars = {
         ntfyServer: cfg.ntfyServer ?? DEFAULT_NTFY_SERVER,
         githubRepo: cfg.githubRepo,
@@ -208,10 +208,10 @@ async function main(): Promise<number> {
         resultsDir: cfg.resultsDir ?? "results",
       };
       const text = renderRoutineInstructions(vars);
-      mkdirSync(xscoutHome(), { recursive: true, mode: 0o700 });
-      const out = join(xscoutHome(), "ROUTINE_INSTRUCTIONS.md");
+      mkdirSync(appHome(), { recursive: true, mode: 0o700 });
+      const out = join(appHome(), "ROUTINE_INSTRUCTIONS.md");
       writeFileSync(out, text);
-      const message = join(xscoutHome(), "CREATE_ROUTINE_MESSAGE.md");
+      const message = join(appHome(), "CREATE_ROUTINE_MESSAGE.md");
       writeFileSync(message, renderCreateRoutineMessage(vars));
       if (flags.print) console.log(text);
       else {
@@ -239,7 +239,7 @@ async function main(): Promise<number> {
     }
 
     case "mcp-spec":
-      console.log(JSON.stringify({ mcpServers: { xscout: serverSpec() } }, null, 2));
+      console.log(JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: serverSpec() } }, null, 2));
       return 0;
 
     case "doctor":
@@ -247,7 +247,7 @@ async function main(): Promise<number> {
 
     case "ask": {
       const query = pos.join(" ").trim();
-      if (!query) throw new Error('usage: xscout ask "<question>"');
+      if (!query) throw new Error('usage: x-via-grokbot ask "<question>"');
       const run = await startResearch({
         query,
         since: str(flags.since),
@@ -265,7 +265,7 @@ async function main(): Promise<number> {
 
     case "result": {
       const [runId] = pos;
-      if (!runId) throw new Error("usage: xscout result <run_id>");
+      if (!runId) throw new Error("usage: x-via-grokbot result <run_id>");
       const outcome = await waitForResult(runId, num(flags.wait) ?? 0, { onTick: () => process.stderr.write(".") });
       console.log(flags.json && outcome.state === "done" ? loadResultCache(runId) : formatOutcome(outcome));
       return outcome.state === "done" ? 0 : 3;
@@ -287,7 +287,7 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (err) => {
-    console.error(`xscout: ${(err as Error).message}`);
+    console.error(`x-via-grokbot: ${(err as Error).message}`);
     process.exit(1);
   },
 );

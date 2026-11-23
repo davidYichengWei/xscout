@@ -18,11 +18,11 @@ function runTs(code: string, env: Record<string, string>): string {
 }
 
 test("file secret store + sealed transfer between machines", () => {
-  const source = mkdtempSync(join(tmpdir(), "xscout-src-"));
-  const target = mkdtempSync(join(tmpdir(), "xscout-dst-"));
-  const common = { XSCOUT_SECRET_STORE: "file", XSCOUT_NO_GH_FALLBACK: "1", XSCOUT_WEBHOOK_SECRET: "" };
+  const source = mkdtempSync(join(tmpdir(), "x-via-grokbot-src-"));
+  const target = mkdtempSync(join(tmpdir(), "x-via-grokbot-dst-"));
+  const common = { X_VIA_GROKBOT_SECRET_STORE: "file", X_VIA_GROKBOT_NO_GH_FALLBACK: "1", X_VIA_GROKBOT_WEBHOOK_SECRET: "" };
   const cli = (home: string, args: string[], input?: string) =>
-    execFileSync(process.execPath, ["src/cli.ts", ...args], { cwd: root, env: { ...process.env, ...common, XSCOUT_HOME: home }, encoding: "utf8", input });
+    execFileSync(process.execPath, ["src/cli.ts", ...args], { cwd: root, env: { ...process.env, ...common, X_VIA_GROKBOT_HOME: home }, encoding: "utf8", input });
 
   cli(source, ["secret", "set", "webhook-secret"], "crsr_secret_value_123\n");
   assert.equal(statSync(join(source, "secrets.json")).mode & 0o777, 0o600);
@@ -37,7 +37,7 @@ test("file secret store + sealed transfer between machines", () => {
   assert.match(cli(target, ["secret", "status"]), /webhook-secret: present/);
   const stored = runTs(`import { getSecret } from "./src/secrets.ts"; process.stdout.write(getSecret("webhook-secret") ?? "")`, {
     ...common,
-    XSCOUT_HOME: target,
+    X_VIA_GROKBOT_HOME: target,
   });
   assert.equal(stored, "crsr_secret_value_123");
   assert.throws(() => cli(target, ["secret", "unseal", "webhook-secret", sealed]), /No transfer key/); // key pair is single-use
@@ -82,7 +82,7 @@ test("fetch goes through HTTP(S)_PROXY when one is set", async () => {
 test("codex config pins proxy env in a sub-table", async () => {
   const { upsertCodexToml } = await import("../src/agents.ts");
   const out = upsertCodexToml("", { command: "/node", args: ["/s.ts"], env: { HTTPS_PROXY: "http://127.0.0.1:18791" } });
-  assert.match(out, /\[mcp_servers\.xscout\]\n[\s\S]*tool_timeout_sec = 300\n\n\[mcp_servers\.xscout\.env\]\nHTTPS_PROXY = "http:\/\/127\.0\.0\.1:18791"\n/);
+  assert.match(out, /\[mcp_servers\.x-via-grokbot\]\n[\s\S]*tool_timeout_sec = 300\n\n\[mcp_servers\.x-via-grokbot\.env\]\nHTTPS_PROXY = "http:\/\/127\.0\.0\.1:18791"\n/);
   assert.equal(upsertCodexToml(out, { command: "/node", args: ["/s.ts"] }).includes("HTTPS_PROXY"), false);
 });
 

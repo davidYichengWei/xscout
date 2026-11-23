@@ -9,7 +9,7 @@ import { VERSION } from "./config.ts";
 export function webhookHeaders(secret: string, body: string, now = Date.now()): Record<string, string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    "user-agent": `xscout/${VERSION}`,
+    "user-agent": `x-via-grokbot/${VERSION}`,
   };
   if (secret.startsWith("whsec_")) {
     const id = `msg_${randomUUID().replaceAll("-", "")}`;

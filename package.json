@@ -1,17 +1,17 @@
 {
-  "name": "xscout",
+  "name": "x-via-grokbot",
   "version": "0.1.0",
-  "description": "Search X from any coding agent through your own Grok Bot (official Webhook Routine + private GitHub inbox).",
+  "description": "Search and read X (Twitter) from any coding agent using your existing Grok Bot subscription — no X API or xAI API key needed.",
   "type": "module",
   "private": true,
   "license": "MIT",
   "author": "David Wei <davidwei319@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/davidYichengWei/xscout.git"
+    "url": "git+https://github.com/davidYichengWei/x-via-grokbot.git"
   },
-  "homepage": "https://github.com/davidYichengWei/xscout#readme",
-  "bugs": "https://github.com/davidYichengWei/xscout/issues",
+  "homepage": "https://github.com/davidYichengWei/x-via-grokbot#readme",
+  "bugs": "https://github.com/davidYichengWei/x-via-grokbot/issues",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -28,8 +28,8 @@
     "node": ">=23.6"
   },
   "bin": {
-    "xscout": "src/cli.ts",
-    "xscout-mcp": "src/server.ts"
+    "x-via-grokbot": "src/cli.ts",
+    "x-via-grokbot-mcp": "src/server.ts"
   },
   "scripts": {
     "mcp": "node src/server.ts",

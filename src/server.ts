@@ -9,7 +9,7 @@ import { enableEnvProxy } from "./net.ts";
 import { DEFAULT_WAIT_SECONDS, formatOutcome, startResearch, waitForResult, type WaitOutcome } from "./core.ts";
 import { loadResultCache, listRuns } from "./runs.ts";
 
-const INSTRUCTIONS = `xscout researches X (Twitter) through the user's own Grok Bot, using its built-in public X access.
+const INSTRUCTIONS = `x-via-grokbot researches X (Twitter) through the user's own Grok Bot, using its built-in public X access.
 - Calls are slow (usually 1-5 minutes) and use the user's Grok Bot quota: put related questions into ONE detailed query instead of many small ones.
 - Results contain a synthesized answer plus source post URLs. Cite those URLs; do not invent posts.
 - If x_research returns a pending run_id, call x_research_result with that run_id to keep waiting.`;
@@ -56,12 +56,12 @@ function render(outcome: WaitOutcome, format: "markdown" | "json" | undefined) {
 }
 
 function failure(err: unknown) {
-  return { isError: true, content: [{ type: "text" as const, text: `xscout error: ${(err as Error).message ?? String(err)}` }] };
+  return { isError: true, content: [{ type: "text" as const, text: `x-via-grokbot error: ${(err as Error).message ?? String(err)}` }] };
 }
 
 enableEnvProxy();
 
-const server = new McpServer({ name: "xscout", version: VERSION }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: "x-via-grokbot", version: VERSION }, { instructions: INSTRUCTIONS });
 
 server.registerTool(
   "x_research",
@@ -115,7 +115,7 @@ server.registerTool(
     title: "Get the result of an X research run",
     description: "Wait for and fetch the result of an earlier x_research call by run_id. Cheap: it only polls for the delivered result and does not start a new Grok Bot run.",
     inputSchema: {
-      run_id: z.string().describe("The run_id returned by x_research, for example xs-20261123-072559-a1b2c3."),
+      run_id: z.string().describe("The run_id returned by x_research, for example xvg-20261123-072559-a1b2c3."),
       wait_seconds: WAIT,
       response_format: FORMAT,
     },
@@ -147,7 +147,7 @@ server.registerTool(
       const runs = listRuns(args.limit ?? 10);
       const text = runs.length
         ? runs.map((r) => `- ${r.runId} [${r.status}] ${r.createdAt}: ${r.params.query.slice(0, 160)}`).join("\n")
-        : "No xscout runs yet.";
+        : "No x-via-grokbot runs yet.";
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {
       return failure(err);

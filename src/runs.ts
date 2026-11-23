@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { xscoutHome } from "./config.ts";
+import { appHome } from "./config.ts";
 import type { NtfyDelivery } from "./ntfy.ts";
 
 export interface ResearchParams {
@@ -29,10 +29,10 @@ export interface RunRecord {
   error?: string;
 }
 
-export const RUN_ID_RE = /^xs-\d{8}-\d{6}-[0-9a-f]{6}$/;
+export const RUN_ID_RE = /^xvg-\d{8}-\d{6}-[0-9a-f]{6}$/;
 
 function runsDir(): string {
-  const dir = join(xscoutHome(), "runs");
+  const dir = join(appHome(), "runs");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
@@ -41,12 +41,12 @@ export function newRunId(now = new Date()): string {
   const iso = now.toISOString(); // 2026-11-23T07:25:59.123Z
   const date = iso.slice(0, 10).replaceAll("-", "");
   const time = iso.slice(11, 19).replaceAll(":", "");
-  return `xs-${date}-${time}-${randomBytes(3).toString("hex")}`;
+  return `xvg-${date}-${time}-${randomBytes(3).toString("hex")}`;
 }
 
-/** results/2026-11-23/xs-20261123-072559-a1b2c3.json */
+/** results/2026-11-23/xvg-20261123-072559-a1b2c3.json */
 export function resultPathFor(resultsDir: string, runId: string): string {
-  const d = runId.slice(3, 11);
+  const d = runId.slice(4, 12);
   return `${resultsDir}/${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}/${runId}.json`;
 }
 

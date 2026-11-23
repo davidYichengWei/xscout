@@ -1,8 +1,8 @@
-import { requireConfig, type XscoutConfig } from "./config.ts";
+import { requireConfig, type AppConfig } from "./config.ts";
 import { readRepoFile } from "./github.ts";
 import { newNtfyTopic, readNtfyResult } from "./ntfy.ts";
 import { newSealKey, SealError } from "./seal.ts";
-import { formatResultMarkdown, parseResult, type XscoutResult } from "./result.ts";
+import { formatResultMarkdown, parseResult, type ResearchResult } from "./result.ts";
 import {
   loadResultCache,
   loadRun,
@@ -16,13 +16,13 @@ import {
 import { requireSecret } from "./secrets.ts";
 import { triggerWebhook } from "./webhook.ts";
 
-export const DEFAULT_WAIT_SECONDS = Number(process.env.XSCOUT_DEFAULT_WAIT ?? 45);
+export const DEFAULT_WAIT_SECONDS = Number(process.env.X_VIA_GROKBOT_DEFAULT_WAIT ?? 45);
 
-/** The JSON body the xscout routine receives. Keep in sync with routine/INSTRUCTIONS.template.md. */
-export function buildPayload(run: RunRecord, cfg: XscoutConfig) {
+/** The JSON body the x-via-grokbot routine receives. Keep in sync with routine/INSTRUCTIONS.template.md. */
+export function buildPayload(run: RunRecord, cfg: AppConfig) {
   const p = run.params;
   return {
-    xscout: 1,
+    x_via_grokbot: 1,
     run_id: run.runId,
     query: p.query,
     params: {
@@ -69,7 +69,7 @@ export async function startResearch(params: ResearchParams): Promise<RunRecord> 
 }
 
 export type WaitOutcome =
-  | { state: "done"; run: RunRecord; result: XscoutResult; elapsedSec: number }
+  | { state: "done"; run: RunRecord; result: ResearchResult; elapsedSec: number }
   | { state: "pending"; run: RunRecord; elapsedSec: number; stale: boolean; warning?: string };
 
 function secondsSince(iso: string, until = Date.now()): number {
@@ -152,7 +152,7 @@ export function formatOutcome(outcome: WaitOutcome): string {
     lines.push(
       `Grok Bot has not delivered a result for run_id "${run.runId}" after ${Math.round(elapsedSec / 60)} minutes.`,
       "The routine run may be stuck (for example on an approval card in the Grok Bot app) or may have failed.",
-      `Ask the user to check the xscout routine run in Grok Bot. You may keep polling with x_research_result({"run_id": "${run.runId}"}) or start a new x_research.`,
+      `Ask the user to check the x-via-grokbot routine run in Grok Bot. You may keep polling with x_research_result({"run_id": "${run.runId}"}) or start a new x_research.`,
     );
   } else {
     lines.push(

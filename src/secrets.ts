@@ -2,20 +2,20 @@ import { execFileSync } from "node:child_process";
 import { constants, generateKeyPairSync, privateDecrypt, publicEncrypt } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { xscoutHome } from "./config.ts";
+import { appHome } from "./config.ts";
 
 /**
- * Secrets live in the macOS login Keychain (service "xscout"), or on other platforms in
- * ~/.xscout/secrets.json (mode 0600). Environment variables always take precedence.
+ * Secrets live in the macOS login Keychain (service "x-via-grokbot"), or on other platforms in
+ * ~/.x-via-grokbot/secrets.json (mode 0600). Environment variables always take precedence.
  */
-const SERVICE = "xscout";
+const SERVICE = "x-via-grokbot";
 
 export const SECRET_NAMES = ["webhook-secret", "github-read-token"] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 
 const ENV_VARS: Record<SecretName, string> = {
-  "webhook-secret": "XSCOUT_WEBHOOK_SECRET",
-  "github-read-token": "XSCOUT_GITHUB_TOKEN",
+  "webhook-secret": "X_VIA_GROKBOT_WEBHOOK_SECRET",
+  "github-read-token": "X_VIA_GROKBOT_GITHUB_TOKEN",
 };
 
 export function isSecretName(name: string): name is SecretName {
@@ -27,11 +27,11 @@ export function secretEnvVar(name: SecretName): string {
 }
 
 function useKeychain(): boolean {
-  return process.platform === "darwin" && process.env.XSCOUT_SECRET_STORE !== "file";
+  return process.platform === "darwin" && process.env.X_VIA_GROKBOT_SECRET_STORE !== "file";
 }
 
 export function secretStoreDescription(): string {
-  return useKeychain() ? 'macOS Keychain service "xscout"' : secretsFile();
+  return useKeychain() ? 'macOS Keychain service "x-via-grokbot"' : secretsFile();
 }
 
 export function getSecret(name: SecretName): string | undefined {
@@ -40,7 +40,7 @@ export function getSecret(name: SecretName): string | undefined {
   const stored = useKeychain() ? readKeychain(name) : readFileStore()[name];
   if (stored) return stored;
   // Read side only: fall back to the GitHub CLI login on this machine. Never used for the bot's write token.
-  if (name === "github-read-token" && process.env.XSCOUT_NO_GH_FALLBACK !== "1") return ghAuthToken();
+  if (name === "github-read-token" && process.env.X_VIA_GROKBOT_NO_GH_FALLBACK !== "1") return ghAuthToken();
   return undefined;
 }
 
@@ -48,7 +48,7 @@ export function requireSecret(name: SecretName): string {
   const value = getSecret(name);
   if (!value) {
     throw new Error(
-      `Missing secret "${name}". Store it with: xscout secret set ${name} --from-file <file>  (or set ${ENV_VARS[name]}).`,
+      `Missing secret "${name}". Store it with: x-via-grokbot secret set ${name} --from-file <file>  (or set ${ENV_VARS[name]}).`,
     );
   }
   return value;
@@ -62,7 +62,7 @@ export function setSecret(name: SecretName, value: string): void {
     // `security -i` keeps the value out of the process argument list.
     const quoted = `"${clean.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
     execFileSync("security", ["-i"], {
-      input: `add-generic-password -U -s ${SERVICE} -a ${name} -l "xscout ${name}" -w ${quoted}\n`,
+      input: `add-generic-password -U -s ${SERVICE} -a ${name} -l "x-via-grokbot ${name}" -w ${quoted}\n`,
       stdio: ["pipe", "ignore", "pipe"],
     });
     if (readKeychain(name) !== clean) throw new Error(`Keychain write for "${name}" could not be verified.`);
@@ -84,7 +84,7 @@ function readKeychain(name: SecretName): string | undefined {
 }
 
 function secretsFile(): string {
-  return join(xscoutHome(), "secrets.json");
+  return join(appHome(), "secrets.json");
 }
 
 function readFileStore(): Partial<Record<SecretName, string>> {
@@ -94,7 +94,7 @@ function readFileStore(): Partial<Record<SecretName, string>> {
 }
 
 function writeFileStore(data: Partial<Record<SecretName, string>>): void {
-  mkdirSync(xscoutHome(), { recursive: true, mode: 0o700 });
+  mkdirSync(appHome(), { recursive: true, mode: 0o700 });
   const path = secretsFile();
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
@@ -119,12 +119,12 @@ function ghAuthToken(): string | undefined {
 
 /*
  * Moving a secret to another machine without it ever appearing in plain text in transit:
- *   target: xscout secret keygen        -> prints an RSA public key (private key stays in ~/.xscout/transfer/)
- *   source: xscout secret seal <name> --pubkey <file>   -> prints ciphertext
- *   target: xscout secret unseal <name> <ciphertext>    -> stores the secret, deletes the key pair
+ *   target: x-via-grokbot secret keygen        -> prints an RSA public key (private key stays in ~/.x-via-grokbot/transfer/)
+ *   source: x-via-grokbot secret seal <name> --pubkey <file>   -> prints ciphertext
+ *   target: x-via-grokbot secret unseal <name> <ciphertext>    -> stores the secret, deletes the key pair
  */
 function transferDir(): string {
-  return join(xscoutHome(), "transfer");
+  return join(appHome(), "transfer");
 }
 
 export function transferKeygen(): string {
@@ -146,7 +146,7 @@ export function sealSecret(name: SecretName, publicKeyPem: string): string {
 
 export function unsealSecret(name: SecretName, ciphertextB64: string): void {
   const keyPath = join(transferDir(), "private.pem");
-  if (!existsSync(keyPath)) throw new Error("No transfer key on this machine. Run `xscout secret keygen` first.");
+  if (!existsSync(keyPath)) throw new Error("No transfer key on this machine. Run `x-via-grokbot secret keygen` first.");
   const value = privateDecrypt(
     { key: readFileSync(keyPath, "utf8"), padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
     Buffer.from(ciphertextB64.replace(/\s+/g, ""), "base64"),

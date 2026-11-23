@@ -1,16 +1,16 @@
-import { VERSION, type XscoutConfig } from "./config.ts";
+import { VERSION, type AppConfig } from "./config.ts";
 
 function headers(token: string, accept: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
     accept,
     "x-github-api-version": "2022-11-28",
-    "user-agent": `xscout/${VERSION}`,
+    "user-agent": `x-via-grokbot/${VERSION}`,
     "cache-control": "no-cache",
   };
 }
 
-function contentsUrl(cfg: XscoutConfig, path: string): string {
+function contentsUrl(cfg: AppConfig, path: string): string {
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   return `${cfg.githubApiBase}/repos/${cfg.githubRepo}/contents/${encodedPath}?ref=${encodeURIComponent(cfg.githubBranch)}`;
 }
@@ -27,7 +27,7 @@ async function failure(res: Response, what: string): Promise<Error> {
 }
 
 /** Returns the raw file text, or null while the file does not exist yet. */
-export async function readRepoFile(cfg: XscoutConfig, token: string, path: string): Promise<string | null> {
+export async function readRepoFile(cfg: AppConfig, token: string, path: string): Promise<string | null> {
   const res = await fetch(contentsUrl(cfg, path), {
     headers: headers(token, "application/vnd.github.raw+json"),
     signal: AbortSignal.timeout(20_000),
@@ -46,7 +46,7 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
-export async function getRepoInfo(cfg: XscoutConfig, token: string): Promise<RepoInfo> {
+export async function getRepoInfo(cfg: AppConfig, token: string): Promise<RepoInfo> {
   const res = await fetch(`${cfg.githubApiBase}/repos/${cfg.githubRepo}`, {
     headers: headers(token, "application/vnd.github+json"),
     signal: AbortSignal.timeout(20_000),

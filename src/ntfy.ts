@@ -9,10 +9,10 @@ export interface NtfyDelivery {
   key: string;
 }
 
-export const NTFY_TOPIC_RE = /^xs_[A-Za-z0-9_-]{24}$/;
+export const NTFY_TOPIC_RE = /^xvg_[A-Za-z0-9_-]{24}$/;
 
 export function newNtfyTopic(): string {
-  return `xs_${randomBytes(18).toString("base64url")}`;
+  return `xvg_${randomBytes(18).toString("base64url")}`;
 }
 
 interface NtfyMessage {
@@ -21,7 +21,7 @@ interface NtfyMessage {
   attachment?: { url: string; size?: number };
 }
 
-const HEADERS = { "user-agent": `xscout/${VERSION}`, "cache-control": "no-cache" };
+const HEADERS = { "user-agent": `x-via-grokbot/${VERSION}`, "cache-control": "no-cache" };
 
 async function get(url: string, what: string): Promise<string> {
   const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });

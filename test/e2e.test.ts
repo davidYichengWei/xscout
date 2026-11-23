@@ -1,8 +1,8 @@
 /**
  * End-to-end test with a local fake of every remote side:
  *  - the Grok Bot webhook (verifies auth, then "researches" and runs the real rendered deliver.py)
- *  - the GitHub contents API (accepts PUTs from deliver.py, serves reads to xscout)
- *  - an ntfy server (accepts PUT attachments from deliver.py, serves polls and downloads to xscout)
+ *  - the GitHub contents API (accepts PUTs from deliver.py, serves reads to x-via-grokbot)
+ *  - an ntfy server (accepts PUT attachments from deliver.py, serves polls and downloads to x-via-grokbot)
  */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -16,13 +16,13 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const REPO = "me/xscout-inbox";
+const REPO = "me/x-via-grokbot-inbox";
 const READ_TOKEN = "read-token-123";
 const WRITE_TOKEN = "write-token-456";
 const WHSEC = `whsec_${randomBytes(24).toString("base64")}`;
 const BEARER = "crsr_test_bearer";
 
-const home = mkdtempSync(join(tmpdir(), "xscout-test-"));
+const home = mkdtempSync(join(tmpdir(), "x-via-grokbot-test-"));
 const files = new Map<string, { content: Buffer; sha: string }>();
 const ntfyMessages = new Map<string, Array<{ id: string; body: Buffer; filename?: string }>>();
 const received: any[] = [];
@@ -62,9 +62,9 @@ async function fakeBot(payload: any) {
   writeFileSync(requestFile, JSON.stringify(request));
   const result =
     botMode === "bad-json"
-      ? { xscout_result: 1, run_id: payload.run_id, status: "maybe" }
+      ? { x_via_grokbot_result: 1, run_id: payload.run_id, status: "maybe" }
       : {
-          xscout_result: 1,
+          x_via_grokbot_result: 1,
           run_id: payload.run_id,
           status: "ok",
           answer_markdown: `People like it [1]. Query was: ${payload.query}`,
@@ -89,9 +89,9 @@ async function fakeBot(payload: any) {
     execFile(
       "python3",
       [script, requestFile, resultFile],
-      { env: { ...process.env, XSCOUT_GITHUB_TOKEN: WRITE_TOKEN, XSCOUT_GITHUB_API: `http://127.0.0.1:${port}` } },
+      { env: { ...process.env, X_VIA_GROKBOT_GITHUB_TOKEN: WRITE_TOKEN, X_VIA_GROKBOT_GITHUB_API: `http://127.0.0.1:${port}` } },
       (err, stdout, stderr) => {
-        if (botMode === "ok" || botMode === "wrong-key") assert.ok(!err && stdout.includes("XSCOUT_DELIVERED"), `deliver.py failed: ${stderr}`);
+        if (botMode === "ok" || botMode === "wrong-key") assert.ok(!err && stdout.includes("X_VIA_GROKBOT_DELIVERED"), `deliver.py failed: ${stderr}`);
         resolve();
       },
     );
@@ -112,14 +112,14 @@ async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method === "GET" && url.pathname === "/v1/health") {
     return res.writeHead(200, { "content-type": "application/json" }).end('{"healthy":true}');
   }
-  const topicPut = req.method === "PUT" && url.pathname.match(/^\/(xs_[A-Za-z0-9_-]{24})$/);
+  const topicPut = req.method === "PUT" && url.pathname.match(/^\/(xvg_[A-Za-z0-9_-]{24})$/);
   if (topicPut) {
     const id = randomBytes(6).toString("hex");
     const filename = req.headers.filename as string | undefined;
     ntfyMessages.set(topicPut[1], [...(ntfyMessages.get(topicPut[1]) ?? []), { id, body: raw, filename }]);
     return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, event: "message", topic: topicPut[1] }));
   }
-  const topicPoll = req.method === "GET" && url.pathname.match(/^\/(xs_[A-Za-z0-9_-]{24})\/json$/);
+  const topicPoll = req.method === "GET" && url.pathname.match(/^\/(xvg_[A-Za-z0-9_-]{24})\/json$/);
   if (topicPoll) {
     assert.equal(url.searchParams.get("poll"), "1");
     const lines = (ntfyMessages.get(topicPoll[1]) ?? []).map((m) =>
@@ -165,21 +165,21 @@ async function handler(req: IncomingMessage, res: ServerResponse) {
 const server = createServer((req, res) => void handler(req, res));
 
 function useSecret(secret: string) {
-  process.env.XSCOUT_WEBHOOK_SECRET = secret;
+  process.env.X_VIA_GROKBOT_WEBHOOK_SECRET = secret;
 }
 
 before(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   port = (server.address() as { port: number }).port;
   Object.assign(process.env, {
-    XSCOUT_HOME: home,
-    XSCOUT_WEBHOOK_URL: `http://127.0.0.1:${port}/webhook`,
-    XSCOUT_GITHUB_REPO: REPO,
-    XSCOUT_GITHUB_API: `http://127.0.0.1:${port}`,
-    XSCOUT_GITHUB_TOKEN: READ_TOKEN,
-    XSCOUT_WEBHOOK_SECRET: WHSEC,
-    XSCOUT_POLL_MS: "100",
-    XSCOUT_NTFY_SERVER: ntfyServer(),
+    X_VIA_GROKBOT_HOME: home,
+    X_VIA_GROKBOT_WEBHOOK_URL: `http://127.0.0.1:${port}/webhook`,
+    X_VIA_GROKBOT_GITHUB_REPO: REPO,
+    X_VIA_GROKBOT_GITHUB_API: `http://127.0.0.1:${port}`,
+    X_VIA_GROKBOT_GITHUB_TOKEN: READ_TOKEN,
+    X_VIA_GROKBOT_WEBHOOK_SECRET: WHSEC,
+    X_VIA_GROKBOT_POLL_MS: "100",
+    X_VIA_GROKBOT_NTFY_SERVER: ntfyServer(),
   });
 });
 
@@ -194,7 +194,7 @@ describe("core flow", () => {
     assert.equal(payload.params.max_posts, 5);
     assert.equal(payload.params.since, "2026-11-01");
     assert.equal(payload.delivery.repo, REPO);
-    assert.match(payload.delivery.path, /^results\/\d{4}-\d{2}-\d{2}\/xs-\d{8}-\d{6}-[0-9a-f]{6}\.json$/);
+    assert.match(payload.delivery.path, /^results\/\d{4}-\d{2}-\d{2}\/xvg-\d{8}-\d{6}-[0-9a-f]{6}\.json$/);
     const outcome = await waitForResult(run.runId, 10);
     assert.equal(outcome.state, "done");
     const text = formatOutcome(outcome);
@@ -244,7 +244,7 @@ describe("core flow", () => {
 
   test("deliver.py refuses invalid results; client reports stale runs", async () => {
     botMode = "bad-json";
-    process.env.XSCOUT_STALE_MINUTES = "0";
+    process.env.X_VIA_GROKBOT_STALE_MINUTES = "0";
     try {
       const { startResearch, waitForResult, formatOutcome } = await import("../src/core.ts");
       const run = await startResearch({ query: "bad json" });
@@ -254,7 +254,7 @@ describe("core flow", () => {
       assert.match(formatOutcome(outcome), /may be stuck/);
     } finally {
       botMode = "ok";
-      delete process.env.XSCOUT_STALE_MINUTES;
+      delete process.env.X_VIA_GROKBOT_STALE_MINUTES;
     }
   });
 
@@ -262,35 +262,35 @@ describe("core flow", () => {
     const { renderDeliverScript } = await import("../src/routine.ts");
     const script = join(home, "deliver-guard.py");
     writeFileSync(script, renderDeliverScript({ ntfyServer: ntfyServer(), githubRepo: REPO, githubBranch: "main", resultsDir: "results" }));
-    const runId = "xs-20261123-000000-abcdef";
+    const runId = "xvg-20261123-000000-abcdef";
     const f = join(home, "x.json");
-    writeFileSync(f, JSON.stringify({ xscout_result: 1, run_id: runId, status: "ok" }));
+    writeFileSync(f, JSON.stringify({ x_via_grokbot_result: 1, run_id: runId, status: "ok" }));
     const deliver = (delivery: object) => {
       const req = join(home, "x.request.json");
-      writeFileSync(req, JSON.stringify({ xscout: 1, run_id: runId, delivery }));
+      writeFileSync(req, JSON.stringify({ x_via_grokbot: 1, run_id: runId, delivery }));
       return new Promise<string>((resolve) =>
-        execFile("python3", [script, req, f], { env: { ...process.env, XSCOUT_GITHUB_TOKEN: WRITE_TOKEN } }, (_e, _o, stderr) => resolve(stderr)),
+        execFile("python3", [script, req, f], { env: { ...process.env, X_VIA_GROKBOT_GITHUB_TOKEN: WRITE_TOKEN } }, (_e, _o, stderr) => resolve(stderr)),
       );
     };
-    assert.match(await deliver({ type: "github", path: "../../etc/passwd" }), /XSCOUT_DELIVERY_FAILED: delivery\.path must be results\/2026-11-23\//);
+    assert.match(await deliver({ type: "github", path: "../../etc/passwd" }), /X_VIA_GROKBOT_DELIVERY_FAILED: delivery\.path must be results\/2026-11-23\//);
     assert.match(
-      await deliver({ type: "ntfy", url: "https://evil.example/xs_AAAAAAAAAAAAAAAAAAAAAAAA", key: "A".repeat(43) }),
-      /XSCOUT_DELIVERY_FAILED: delivery\.url must be/,
+      await deliver({ type: "ntfy", url: "https://evil.example/xvg_AAAAAAAAAAAAAAAAAAAAAAAA", key: "A".repeat(43) }),
+      /X_VIA_GROKBOT_DELIVERY_FAILED: delivery\.url must be/,
     );
-    assert.match(await deliver({ type: "ntfy", url: `${ntfyServer()}/xs_AAAAAAAAAAAAAAAAAAAAAAAA`, key: "short" }), /delivery\.key must be/);
+    assert.match(await deliver({ type: "ntfy", url: `${ntfyServer()}/xvg_AAAAAAAAAAAAAAAAAAAAAAAA`, key: "short" }), /delivery\.key must be/);
   });
 
   test("ntfy-only routines refuse GitHub delivery", async () => {
     const { renderDeliverScript, renderRoutineInstructions } = await import("../src/routine.ts");
     const vars = { ntfyServer: "https://ntfy.sh", githubBranch: "main", resultsDir: "results" };
-    assert.doesNotMatch(renderRoutineInstructions(vars).split("```python")[0], /XSCOUT_GITHUB_TOKEN|"type": "github"/);
+    assert.doesNotMatch(renderRoutineInstructions(vars).split("```python")[0], /X_VIA_GROKBOT_GITHUB_TOKEN|"type": "github"/);
     const script = join(home, "deliver-ntfy-only.py");
     writeFileSync(script, renderDeliverScript(vars));
-    const runId = "xs-20261123-000000-abcdef";
+    const runId = "xvg-20261123-000000-abcdef";
     const f = join(home, "y.json");
     const req = join(home, "y.request.json");
-    writeFileSync(f, JSON.stringify({ xscout_result: 1, run_id: runId, status: "ok" }));
-    writeFileSync(req, JSON.stringify({ xscout: 1, run_id: runId, delivery: { type: "github", path: "results/2026-11-23/x.json" } }));
+    writeFileSync(f, JSON.stringify({ x_via_grokbot_result: 1, run_id: runId, status: "ok" }));
+    writeFileSync(req, JSON.stringify({ x_via_grokbot: 1, run_id: runId, delivery: { type: "github", path: "results/2026-11-23/x.json" } }));
     const err = await new Promise<string>((resolve) => execFile("python3", [script, req, f], (_e, _o, stderr) => resolve(stderr)));
     assert.match(err, /GitHub delivery is not enabled/);
   });
@@ -298,10 +298,10 @@ describe("core flow", () => {
 
 describe("ntfy transport", () => {
   before(() => {
-    process.env.XSCOUT_TRANSPORT = "ntfy";
+    process.env.X_VIA_GROKBOT_TRANSPORT = "ntfy";
   });
   after(() => {
-    delete process.env.XSCOUT_TRANSPORT;
+    delete process.env.X_VIA_GROKBOT_TRANSPORT;
   });
 
   test("routine encrypts with the per-run key; ntfy only ever sees ciphertext", async () => {
@@ -309,7 +309,7 @@ describe("ntfy transport", () => {
     const run = await startResearch({ query: "What do people think of Bar?" });
     const payload = received.at(-1);
     assert.equal(payload.delivery.type, "ntfy");
-    assert.match(payload.delivery.url, new RegExp(`^${ntfyServer()}/xs_[A-Za-z0-9_-]{24}$`));
+    assert.match(payload.delivery.url, new RegExp(`^${ntfyServer()}/xvg_[A-Za-z0-9_-]{24}$`));
     assert.match(payload.delivery.key, /^[A-Za-z0-9_-]{43}$/);
     assert.equal(payload.delivery.repo, undefined);
     const outcome = await waitForResult(run.runId, 10);
@@ -320,7 +320,7 @@ describe("ntfy transport", () => {
     assert.equal(stored.length, 1);
     assert.equal(stored[0].filename, `${run.runId}.json`);
     assert.doesNotMatch(stored[0].body.toString(), /People like it|someone|Bar/);
-    assert.equal(JSON.parse(stored[0].body.toString()).xscout_sealed, 1);
+    assert.equal(JSON.parse(stored[0].body.toString()).x_via_grokbot_sealed, 1);
   });
 
   test("a result sealed with the wrong key fails fast instead of polling forever", async () => {
@@ -338,10 +338,10 @@ describe("ntfy transport", () => {
     const { newSealKey, openSealed, seal } = await import("../src/seal.ts");
     const key = newSealKey();
     const text = JSON.stringify({ hello: "世界", n: "x".repeat(10_000) });
-    const sealed = seal(text, key, "xs-20261123-000000-abcdef");
-    assert.equal(openSealed(sealed, key, "xs-20261123-000000-abcdef"), text);
-    assert.throws(() => openSealed(sealed, key, "xs-20261123-000000-000000"), /envelope is for run/);
-    assert.throws(() => openSealed(sealed, newSealKey(), "xs-20261123-000000-abcdef"), /failed authentication/);
+    const sealed = seal(text, key, "xvg-20261123-000000-abcdef");
+    assert.equal(openSealed(sealed, key, "xvg-20261123-000000-abcdef"), text);
+    assert.throws(() => openSealed(sealed, key, "xvg-20261123-000000-000000"), /envelope is for run/);
+    assert.throws(() => openSealed(sealed, newSealKey(), "xvg-20261123-000000-abcdef"), /failed authentication/);
   });
 });
 
@@ -363,7 +363,7 @@ describe("MCP server over stdio", () => {
       assert.match(res.content[0].text, /## X research: MCP end to end/);
       assert.match(res.content[0].text, /x\.com\/someone\/status\/1/);
       const json: any = await client.callTool({ name: "x_research", arguments: { query: "json please", wait_seconds: 10, response_format: "json" } });
-      assert.equal(JSON.parse(json.content[0].text).xscout_result, 1);
+      assert.equal(JSON.parse(json.content[0].text).x_via_grokbot_result, 1);
       const recent: any = await client.callTool({ name: "x_research_recent", arguments: { limit: 3 } });
       assert.match(recent.content[0].text, /json please/);
       const unknown: any = await client.callTool({ name: "x_research_result", arguments: { run_id: "nope" } });
@@ -375,14 +375,14 @@ describe("MCP server over stdio", () => {
 });
 
 describe("codex config merge", () => {
-  test("replaces an existing xscout block and keeps everything else", async () => {
+  test("replaces an existing x-via-grokbot block and keeps everything else", async () => {
     const { upsertCodexToml } = await import("../src/agents.ts");
-    const before = `model = "x"\n\n[mcp_servers.xscout]\ncommand = "old"\n\n[mcp_servers.xscout.env]\nA = "1"\n\n[mcp_servers.other]\ncommand = "keep"\n`;
+    const before = `model = "x"\n\n[mcp_servers.x-via-grokbot]\ncommand = "old"\n\n[mcp_servers.x-via-grokbot.env]\nA = "1"\n\n[mcp_servers.other]\ncommand = "keep"\n`;
     const out = upsertCodexToml(before, { command: "/node", args: ["/srv.ts"] });
     assert.doesNotMatch(out, /old/);
     assert.doesNotMatch(out, /A = "1"/);
     assert.match(out, /\[mcp_servers\.other\]\ncommand = "keep"/);
-    assert.match(out, /\[mcp_servers\.xscout\]\ncommand = "\/node"\nargs = \["\/srv\.ts"\]/);
+    assert.match(out, /\[mcp_servers\.x-via-grokbot\]\ncommand = "\/node"\nargs = \["\/srv\.ts"\]/);
     assert.equal(upsertCodexToml(out, { command: "/node", args: ["/srv.ts"] }), out);
   });
 });

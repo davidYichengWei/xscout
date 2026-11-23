@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { proxyEnv } from "./net.ts";
 
+export const MCP_SERVER_NAME = "x-via-grokbot";
+
 export const AGENT_IDS = ["claude", "codex", "cursor", "antigravity"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
@@ -44,7 +46,7 @@ function resolveTarget(path: string): string {
 
 function backup(path: string): string | undefined {
   if (!existsSync(path) || readFileSync(path, "utf8").trim() === "") return undefined;
-  const dest = `${path}.xscout-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const dest = `${path}.x-via-grokbot-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   copyFileSync(path, dest);
   return dest;
 }
@@ -60,15 +62,18 @@ function upsertJsonMcp(file: string, spec: ServerSpec, dryRun: boolean): string 
       throw new Error(`${target} is not valid JSON (${(err as Error).message}); fix it and re-run.`);
     }
   }
-  data.mcpServers = { ...(data.mcpServers ?? {}), xscout: { command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) } };
-  if (dryRun) return `would write mcpServers.xscout to ${target}`;
+  data.mcpServers = {
+    ...(data.mcpServers ?? {}),
+    [MCP_SERVER_NAME]: { command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) },
+  };
+  if (dryRun) return `would write mcpServers["${MCP_SERVER_NAME}"] to ${target}`;
   const saved = backup(target);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, `${JSON.stringify(data, null, 2)}\n`);
-  return `wrote mcpServers.xscout to ${target}${saved ? ` (backup: ${saved})` : ""}`;
+  return `wrote mcpServers["${MCP_SERVER_NAME}"] to ${target}${saved ? ` (backup: ${saved})` : ""}`;
 }
 
-/** Removes every [mcp_servers.xscout] / [mcp_servers.xscout.*] table, then appends a fresh one. */
+/** Removes every [mcp_servers.x-via-grokbot] / [mcp_servers.x-via-grokbot.*] table, then appends a fresh one. */
 export function upsertCodexToml(text: string, spec: ServerSpec): string {
   const kept: string[] = [];
   let skipping = false;
@@ -76,19 +81,19 @@ export function upsertCodexToml(text: string, spec: ServerSpec): string {
     const header = line.match(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/);
     if (header) {
       const name = header[1].replace(/"/g, "");
-      skipping = name === "mcp_servers.xscout" || name.startsWith("mcp_servers.xscout.");
+      skipping = name === `mcp_servers.${MCP_SERVER_NAME}` || name.startsWith(`mcp_servers.${MCP_SERVER_NAME}.`);
     }
     if (!skipping) kept.push(line);
   }
   const block = [
-    "[mcp_servers.xscout]",
+    `[mcp_servers.${MCP_SERVER_NAME}]`,
     `command = ${JSON.stringify(spec.command)}`,
     `args = [${spec.args.map((a) => JSON.stringify(a)).join(", ")}]`,
     "startup_timeout_sec = 20",
     "tool_timeout_sec = 300",
     "",
     ...(spec.env
-      ? ["[mcp_servers.xscout.env]", ...Object.entries(spec.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`), ""]
+      ? [`[mcp_servers.${MCP_SERVER_NAME}.env]`, ...Object.entries(spec.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`), ""]
       : []),
   ].join("\n");
   const base = kept.join("\n").replace(/\s*$/, "");
@@ -99,11 +104,11 @@ function installCodex(spec: ServerSpec, dryRun: boolean): string {
   const target = resolveTarget(join(homedir(), ".codex", "config.toml"));
   const text = existsSync(target) ? readFileSync(target, "utf8") : "";
   const next = upsertCodexToml(text, spec);
-  if (dryRun) return `would write [mcp_servers.xscout] to ${target}`;
+  if (dryRun) return `would write [mcp_servers.${MCP_SERVER_NAME}] to ${target}`;
   const saved = backup(target);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, next);
-  return `wrote [mcp_servers.xscout] to ${target}${saved ? ` (backup: ${saved})` : ""}`;
+  return `wrote [mcp_servers.${MCP_SERVER_NAME}] to ${target}${saved ? ` (backup: ${saved})` : ""}`;
 }
 
 /** Claude Code keeps user-scope MCP servers in .claude.json, which moves when CLAUDE_CONFIG_DIR is set. */
@@ -114,14 +119,14 @@ export function claudeConfigFile(): string {
 
 function installClaude(spec: ServerSpec, dryRun: boolean): string {
   const json = JSON.stringify({ type: "stdio", command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) });
-  if (dryRun) return `would run: claude mcp add-json --scope user xscout '${json}'`;
+  if (dryRun) return `would run: claude mcp add-json --scope user ${MCP_SERVER_NAME} '${json}'`;
   try {
-    execFileSync("claude", ["mcp", "remove", "--scope", "user", "xscout"], { stdio: "ignore" });
+    execFileSync("claude", ["mcp", "remove", "--scope", "user", MCP_SERVER_NAME], { stdio: "ignore" });
   } catch {
     // not registered yet
   }
-  execFileSync("claude", ["mcp", "add-json", "--scope", "user", "xscout", json], { stdio: "pipe" });
-  return `registered xscout in Claude Code (user scope, ${claudeConfigFile()})`;
+  execFileSync("claude", ["mcp", "add-json", "--scope", "user", MCP_SERVER_NAME, json], { stdio: "pipe" });
+  return `registered ${MCP_SERVER_NAME} in Claude Code (user scope, ${claudeConfigFile()})`;
 }
 
 export function installAgent(id: AgentId, spec: ServerSpec, dryRun = false): string {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Contract between the xscout routine (writer) and this client (reader). Keep in sync with routine/INSTRUCTIONS.template.md. */
+/** Contract between the x-via-grokbot routine (writer) and this client (reader). Keep in sync with routine/INSTRUCTIONS.template.md. */
 const Metrics = z.looseObject({
   likes: z.number().nullish(),
   reposts: z.number().nullish(),
@@ -20,7 +20,7 @@ const Post = z.looseObject({
 });
 
 export const ResultSchema = z.looseObject({
-  xscout_result: z.literal(1),
+  x_via_grokbot_result: z.literal(1),
   run_id: z.string(),
   status: z.enum(["ok", "error"]),
   answer_markdown: z.string().nullish(),
@@ -32,10 +32,10 @@ export const ResultSchema = z.looseObject({
   completed_at: z.string().nullish(),
 });
 
-export type XscoutResult = z.infer<typeof ResultSchema>;
-export type XscoutPost = z.infer<typeof Post>;
+export type ResearchResult = z.infer<typeof ResultSchema>;
+export type ResearchPost = z.infer<typeof Post>;
 
-export function parseResult(raw: string, expectedRunId: string): XscoutResult {
+export function parseResult(raw: string, expectedRunId: string): ResearchResult {
   let json: unknown;
   try {
     json = JSON.parse(raw);
@@ -44,7 +44,7 @@ export function parseResult(raw: string, expectedRunId: string): XscoutResult {
   }
   const parsed = ResultSchema.safeParse(json);
   if (!parsed.success) {
-    throw new Error(`Result file does not match the xscout schema: ${z.prettifyError(parsed.error)}`);
+    throw new Error(`Result file does not match the x-via-grokbot schema: ${z.prettifyError(parsed.error)}`);
   }
   if (parsed.data.run_id !== expectedRunId) {
     throw new Error(`Result run_id mismatch: expected ${expectedRunId}, got ${parsed.data.run_id}`);
@@ -59,7 +59,7 @@ function fmtCount(n: number | null | undefined): string | undefined {
   return String(n);
 }
 
-function formatPost(p: XscoutPost, i: number): string {
+function formatPost(p: ResearchPost, i: number): string {
   const who = [p.author_handle ? `@${p.author_handle.replace(/^@/, "")}` : undefined, p.author_name ? `(${p.author_name})` : undefined]
     .filter(Boolean)
     .join(" ");
@@ -79,7 +79,7 @@ function formatPost(p: XscoutPost, i: number): string {
   return lines.join("\n");
 }
 
-export function formatResultMarkdown(r: XscoutResult, query: string, elapsedSec?: number): string {
+export function formatResultMarkdown(r: ResearchResult, query: string, elapsedSec?: number): string {
   const out: string[] = [];
   if (r.status === "error") {
     out.push(`Grok Bot could not finish this research: ${r.error ?? "unknown error"}`);
@@ -91,6 +91,6 @@ export function formatResultMarkdown(r: XscoutResult, query: string, elapsedSec?
   out.push(posts.length ? posts.map(formatPost).join("\n\n") : "_No posts returned._", "");
   if (r.coverage_notes?.trim()) out.push(`### Coverage notes`, "", r.coverage_notes.trim(), "");
   if (r.searches?.length) out.push(`_Searches run: ${r.searches.map((s) => `\`${s}\``).join(", ")}_`);
-  out.push(`_run_id: ${r.run_id}${elapsedSec !== undefined ? ` · ${Math.round(elapsedSec)}s` : ""} · via Grok Bot (xscout)_`);
+  out.push(`_run_id: ${r.run_id}${elapsedSec !== undefined ? ` · ${Math.round(elapsedSec)}s` : ""} · via Grok Bot (x-via-grokbot)_`);
   return out.join("\n");
 }

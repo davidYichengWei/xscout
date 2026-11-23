@@ -5,16 +5,16 @@ import { deflateSync, inflateSync } from "node:zlib";
  * Result envelope for relays that should only ever see ciphertext (ntfy). The routine side is
  * implemented with the Python standard library in routine/deliver.template.py, which has no AES,
  * so this is encrypt-then-MAC built from HMAC-SHA256 only:
- *   enc = HMAC(key, "xscout-enc"), mac = HMAC(key, "xscout-mac")
+ *   enc = HMAC(key, "x-via-grokbot-enc"), mac = HMAC(key, "x-via-grokbot-mac")
  *   ciphertext = deflate(plaintext) XOR (HMAC(enc, nonce || be64(0)) || HMAC(enc, nonce || be64(1)) || ...)
- *   tag = HMAC(mac, "xscout-v1\0" || run_id || "\0" || nonce || ciphertext)
+ *   tag = HMAC(mac, "x-via-grokbot-v1\0" || run_id || "\0" || nonce || ciphertext)
  * Keep both implementations byte-for-byte compatible.
  */
 
 export const SEAL_VERSION = 1;
 
 export interface SealedEnvelope {
-  xscout_sealed: typeof SEAL_VERSION;
+  x_via_grokbot_sealed: typeof SEAL_VERSION;
   run_id: string;
   nonce: string;
   ciphertext: string;
@@ -51,12 +51,12 @@ function keystreamXor(encKey: Buffer, nonce: Buffer, data: Buffer): Buffer {
 }
 
 function tagFor(macKey: Buffer, runId: string, nonce: Buffer, ciphertext: Buffer): Buffer {
-  return hmac(macKey, Buffer.from(`xscout-v1\0${runId}\0`), nonce, ciphertext);
+  return hmac(macKey, Buffer.from(`x-via-grokbot-v1\0${runId}\0`), nonce, ciphertext);
 }
 
 function subkeys(keyB64url: string) {
   const key = decodeKey(keyB64url);
-  return { enc: hmac(key, Buffer.from("xscout-enc")), mac: hmac(key, Buffer.from("xscout-mac")) };
+  return { enc: hmac(key, Buffer.from("x-via-grokbot-enc")), mac: hmac(key, Buffer.from("x-via-grokbot-mac")) };
 }
 
 export function seal(plaintext: string, keyB64url: string, runId: string): string {
@@ -64,7 +64,7 @@ export function seal(plaintext: string, keyB64url: string, runId: string): strin
   const nonce = randomBytes(16);
   const ciphertext = keystreamXor(enc, nonce, deflateSync(Buffer.from(plaintext, "utf8"), { level: 9 }));
   const envelope: SealedEnvelope = {
-    xscout_sealed: SEAL_VERSION,
+    x_via_grokbot_sealed: SEAL_VERSION,
     run_id: runId,
     nonce: nonce.toString("base64"),
     ciphertext: ciphertext.toString("base64"),
@@ -79,10 +79,15 @@ export function openSealed(text: string, keyB64url: string, runId: string): stri
   try {
     env = JSON.parse(text);
   } catch {
-    throw new SealError("delivered message is not a sealed xscout envelope");
+    throw new SealError("delivered message is not a sealed x-via-grokbot envelope");
   }
-  if (env.xscout_sealed !== SEAL_VERSION || typeof env.nonce !== "string" || typeof env.ciphertext !== "string" || typeof env.tag !== "string") {
-    throw new SealError("delivered message is not a sealed xscout envelope");
+  if (
+    env.x_via_grokbot_sealed !== SEAL_VERSION ||
+    typeof env.nonce !== "string" ||
+    typeof env.ciphertext !== "string" ||
+    typeof env.tag !== "string"
+  ) {
+    throw new SealError("delivered message is not a sealed x-via-grokbot envelope");
   }
   if (env.run_id !== runId) throw new SealError(`envelope is for run ${env.run_id}, expected ${runId}`);
   const { enc, mac } = subkeys(keyB64url);

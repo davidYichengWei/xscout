@@ -14,15 +14,15 @@ export function proxyEnv(): Record<string, string> {
 
 /**
  * Node's fetch ignores HTTP(S)_PROXY by default. Corporate/dev boxes often only reach
- * GitHub through a proxy, so opt in to Node's built-in env-proxy support when one is set.
+ * external hosts through a proxy, so opt in to Node's built-in env-proxy support when one is set.
  */
 export function enableEnvProxy(): boolean {
   const env = process.env;
   if (!(env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy)) return false;
-  if (env.XSCOUT_NO_PROXY_SUPPORT === "1") return false;
+  if (env.X_VIA_GROKBOT_NO_PROXY_SUPPORT === "1") return false;
   const setGlobal = (http as unknown as { setGlobalProxyFromEnv?: (env?: NodeJS.ProcessEnv) => void }).setGlobalProxyFromEnv;
   if (typeof setGlobal !== "function") {
-    process.stderr.write("xscout: proxy env detected but this Node lacks http.setGlobalProxyFromEnv; use Node >= 25 or NODE_USE_ENV_PROXY=1\n");
+    process.stderr.write("x-via-grokbot: proxy env detected but this Node lacks http.setGlobalProxyFromEnv; use Node >= 25 or NODE_USE_ENV_PROXY=1\n");
     return false;
   }
   setGlobal();
