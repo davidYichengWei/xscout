@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { enableEnvProxy } from "./net.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,19 @@ import { formatOutcome, startResearch, waitForResult } from "./core.ts";
 import { getRepoInfo } from "./github.ts";
 import { renderRoutineInstructions } from "./routine.ts";
 import { listRuns, loadResultCache } from "./runs.ts";
-import { getSecret, isSecretName, SECRET_NAMES, secretEnvVar, setSecret } from "./secrets.ts";
+import {
+  getSecret,
+  isSecretName,
+  sealSecret,
+  SECRET_NAMES,
+  secretEnvVar,
+  secretStoreDescription,
+  setSecret,
+  transferKeygen,
+  unsealSecret,
+} from "./secrets.ts";
+
+enableEnvProxy();
 
 const BOOL_FLAGS = new Set(["json", "dry-run", "print", "help"]);
 
@@ -36,6 +49,7 @@ Setup
   xscout config --repo <owner/name> --webhook-url <url> [--branch main] [--results-dir results]
   xscout secret set <webhook-secret|github-read-token> [--from-file <file>]   (else reads stdin)
   xscout secret status
+  xscout secret keygen | seal <name> --pubkey <file> | unseal <name> <ciphertext>   (move a secret between machines)
   xscout routine [--print]          Render the routine instructions to paste into Grok Bot
   xscout install-agents [--only claude,codex,cursor,antigravity] [--dry-run]
   xscout doctor                     Check configuration, secrets and GitHub access
@@ -68,7 +82,7 @@ async function doctor(): Promise<number> {
   cfg.webhookUrl ? ok(`webhookUrl ${cfg.webhookUrl.replace(/(.{40}).+/, "$1…")}`) : (failures++, bad("webhookUrl missing"));
   cfg.githubRepo ? ok(`githubRepo ${cfg.githubRepo} @ ${cfg.githubBranch}, dir ${cfg.resultsDir}/`) : (failures++, bad("githubRepo missing"));
 
-  console.log("secrets (macOS Keychain service \"xscout\" or env)");
+  console.log(`secrets (${secretStoreDescription()}, or env)`);
   const webhookSecret = getSecret("webhook-secret");
   webhookSecret
     ? ok(`webhook-secret present (${webhookSecret.startsWith("whsec_") ? "Standard Webhooks signing" : "Bearer key"})`)
@@ -137,6 +151,21 @@ async function main(): Promise<number> {
         for (const n of SECRET_NAMES) console.log(`${n}: ${getSecret(n) ? "present" : `missing (Keychain or ${secretEnvVar(n)})`}`);
         return 0;
       }
+      if (sub === "keygen") {
+        process.stdout.write(transferKeygen());
+        return 0;
+      }
+      if (sub === "seal" && name && isSecretName(name)) {
+        const pub = str(flags.pubkey);
+        if (!pub) throw new Error("usage: xscout secret seal <name> --pubkey <file>");
+        console.log(sealSecret(name, readFileSync(pub, "utf8")));
+        return 0;
+      }
+      if (sub === "unseal" && name && isSecretName(name) && pos[2]) {
+        unsealSecret(name, pos[2]);
+        console.log(`Stored ${name} in ${secretStoreDescription()}.`);
+        return 0;
+      }
       if (sub !== "set" || !name || !isSecretName(name)) {
         console.error(`usage: xscout secret set <${SECRET_NAMES.join("|")}> [--from-file <file>]`);
         return 2;
@@ -144,7 +173,7 @@ async function main(): Promise<number> {
       const file = str(flags["from-file"]);
       const value = file ? readFileSync(file, "utf8") : await readStdin();
       setSecret(name, value);
-      console.log(`Stored ${name} in the macOS Keychain (service "xscout").`);
+      console.log(`Stored ${name} in ${secretStoreDescription()}.`);
       return 0;
     }
 

@@ -5,6 +5,7 @@ import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/proto
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { VERSION } from "./config.ts";
+import { enableEnvProxy } from "./net.ts";
 import { DEFAULT_WAIT_SECONDS, formatOutcome, startResearch, waitForResult, type WaitOutcome } from "./core.ts";
 import { loadResultCache, listRuns } from "./runs.ts";
 
@@ -57,6 +58,8 @@ function render(outcome: WaitOutcome, format: "markdown" | "json" | undefined) {
 function failure(err: unknown) {
   return { isError: true, content: [{ type: "text" as const, text: `xscout error: ${(err as Error).message ?? String(err)}` }] };
 }
+
+enableEnvProxy();
 
 const server = new McpServer({ name: "xscout", version: VERSION }, { instructions: INSTRUCTIONS });
 

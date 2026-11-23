@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeF
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { proxyEnv } from "./net.ts";
 
 export const AGENT_IDS = ["claude", "codex", "cursor", "antigravity"] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
@@ -10,6 +11,8 @@ export type AgentId = (typeof AGENT_IDS)[number];
 export interface ServerSpec {
   command: string;
   args: string[];
+  /** Pinned env, currently only proxy variables (some agents, e.g. Codex, strip the parent env). */
+  env?: Record<string, string>;
 }
 
 /** Prefer a stable PATH symlink (e.g. /opt/homebrew/bin/node) over a versioned Cellar path that breaks on upgrade. */
@@ -27,7 +30,12 @@ function stableNodePath(): string {
 }
 
 export function serverSpec(): ServerSpec {
-  return { command: stableNodePath(), args: [fileURLToPath(new URL("./server.ts", import.meta.url))] };
+  const env = proxyEnv();
+  return {
+    command: stableNodePath(),
+    args: [fileURLToPath(new URL("./server.ts", import.meta.url))],
+    ...(Object.keys(env).length ? { env } : {}),
+  };
 }
 
 function resolveTarget(path: string): string {
@@ -52,7 +60,7 @@ function upsertJsonMcp(file: string, spec: ServerSpec, dryRun: boolean): string 
       throw new Error(`${target} is not valid JSON (${(err as Error).message}); fix it and re-run.`);
     }
   }
-  data.mcpServers = { ...(data.mcpServers ?? {}), xscout: { command: spec.command, args: spec.args } };
+  data.mcpServers = { ...(data.mcpServers ?? {}), xscout: { command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) } };
   if (dryRun) return `would write mcpServers.xscout to ${target}`;
   const saved = backup(target);
   mkdirSync(dirname(target), { recursive: true });
@@ -79,6 +87,9 @@ export function upsertCodexToml(text: string, spec: ServerSpec): string {
     "startup_timeout_sec = 20",
     "tool_timeout_sec = 300",
     "",
+    ...(spec.env
+      ? ["[mcp_servers.xscout.env]", ...Object.entries(spec.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`), ""]
+      : []),
   ].join("\n");
   const base = kept.join("\n").replace(/\s*$/, "");
   return `${base ? `${base}\n\n` : ""}${block}`;
@@ -96,7 +107,7 @@ function installCodex(spec: ServerSpec, dryRun: boolean): string {
 }
 
 function installClaude(spec: ServerSpec, dryRun: boolean): string {
-  const json = JSON.stringify({ type: "stdio", command: spec.command, args: spec.args });
+  const json = JSON.stringify({ type: "stdio", command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) });
   if (dryRun) return `would run: claude mcp add-json --scope user xscout '${json}'`;
   try {
     execFileSync("claude", ["mcp", "remove", "--scope", "user", "xscout"], { stdio: "ignore" });

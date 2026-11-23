@@ -59,6 +59,8 @@ npm run typecheck
 ```
 
 - 需要 Node ≥ 23.6，直接运行 `.ts` 文件。
-- 秘密存放在 macOS 钥匙串（service `xscout`），也可以用环境变量 `XSCOUT_WEBHOOK_SECRET` / `XSCOUT_GITHUB_TOKEN` 覆盖。
+- 秘密存放位置：macOS 上是钥匙串（service `xscout`），Linux 上是 `~/.xscout/secrets.json`（权限 600）。两者都可以用环境变量 `XSCOUT_WEBHOOK_SECRET` / `XSCOUT_GITHUB_TOKEN` 覆盖。读结果时如果没有存 token，会自动使用 `gh auth token`。
+- 代理：如果设置了 `HTTPS_PROXY` / `HTTP_PROXY`，会自动启用 Node 内置的代理支持（需要 Node ≥ 25）。`install-agents` 会把当前的代理变量写进各 Agent 的 MCP 配置，因为 Codex 这类 Agent 不会把父进程的环境变量传给 MCP。
+- 跨机器迁移密钥：在目标机器上运行 `xscout secret keygen`，在源机器上运行 `xscout secret seal <name> --pubkey <file>`，再回到目标机器运行 `xscout secret unseal <name> <密文>`。密钥只以 RSA-OAEP 加密后的形式传输，用过的密钥对会自动删除。
 - 本地状态保存在 `~/.xscout/`。
 - Agent 配置里写的是本目录的绝对路径。移动目录后要重新运行 `install-agents`。
