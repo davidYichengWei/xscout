@@ -21,7 +21,12 @@ export function renderDeliverScript(vars: RoutineVars): string {
   return fill(template("deliver.template.py"), vars);
 }
 
-/** The text to paste into the XScout routine's Instructions field in Grok Bot. */
+/** The text to paste into the xscout routine's Instructions field in Grok Bot. */
 export function renderRoutineInstructions(vars: RoutineVars): string {
   return fill(template("INSTRUCTIONS.template.md"), vars).replace("{{DELIVER_SCRIPT}}", renderDeliverScript(vars).trimEnd());
+}
+
+/** A chat message asking Grok Bot to create the routine itself, with the instructions embedded. */
+export function renderCreateRoutineMessage(vars: RoutineVars): string {
+  return template("CREATE_ROUTINE_MESSAGE.template.md").replace("{{INSTRUCTIONS}}", renderRoutineInstructions(vars).trimEnd());
 }

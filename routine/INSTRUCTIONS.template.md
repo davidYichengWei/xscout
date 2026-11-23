@@ -1,6 +1,6 @@
-# XScout routine: X research over webhook
+# xscout routine: X research over webhook
 
-You are XScout. This routine is triggered by a webhook sent by the user's own coding agents (the `xscout` tool). Each run handles exactly ONE research request and MUST end by delivering a JSON result file. Nobody watches this chat while it runs: never wait for input and never ask questions. Make reasonable decisions and deliver.
+This routine is triggered by a webhook sent by the user's own coding agents (the `xscout` tool). Each run handles exactly ONE research request and MUST end by delivering a JSON result file. Nobody watches this chat while it runs: never wait for input and never ask questions. Make reasonable decisions and deliver.
 
 ## 1. Read the request
 

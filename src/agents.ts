@@ -29,8 +29,8 @@ function stableNodePath(): string {
   return process.execPath;
 }
 
-export function serverSpec(): ServerSpec {
-  const env = proxyEnv();
+export function serverSpec({ pinProxy = true }: { pinProxy?: boolean } = {}): ServerSpec {
+  const env = pinProxy ? proxyEnv() : {};
   return {
     command: stableNodePath(),
     args: [fileURLToPath(new URL("./server.ts", import.meta.url))],
@@ -106,6 +106,12 @@ function installCodex(spec: ServerSpec, dryRun: boolean): string {
   return `wrote [mcp_servers.xscout] to ${target}${saved ? ` (backup: ${saved})` : ""}`;
 }
 
+/** Claude Code keeps user-scope MCP servers in .claude.json, which moves when CLAUDE_CONFIG_DIR is set. */
+export function claudeConfigFile(): string {
+  const dir = process.env.CLAUDE_CONFIG_DIR;
+  return dir ? join(dir, ".claude.json") : join(homedir(), ".claude.json");
+}
+
 function installClaude(spec: ServerSpec, dryRun: boolean): string {
   const json = JSON.stringify({ type: "stdio", command: spec.command, args: spec.args, ...(spec.env ? { env: spec.env } : {}) });
   if (dryRun) return `would run: claude mcp add-json --scope user xscout '${json}'`;
@@ -115,7 +121,7 @@ function installClaude(spec: ServerSpec, dryRun: boolean): string {
     // not registered yet
   }
   execFileSync("claude", ["mcp", "add-json", "--scope", "user", "xscout", json], { stdio: "pipe" });
-  return "registered xscout in Claude Code (user scope, ~/.claude.json)";
+  return `registered xscout in Claude Code (user scope, ${claudeConfigFile()})`;
 }
 
 export function installAgent(id: AgentId, spec: ServerSpec, dryRun = false): string {

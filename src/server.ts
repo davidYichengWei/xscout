@@ -9,8 +9,8 @@ import { enableEnvProxy } from "./net.ts";
 import { DEFAULT_WAIT_SECONDS, formatOutcome, startResearch, waitForResult, type WaitOutcome } from "./core.ts";
 import { loadResultCache, listRuns } from "./runs.ts";
 
-const INSTRUCTIONS = `xscout researches X (Twitter) through the user's own Grok Bot ("XScout"), using its built-in public X access.
-- Calls are slow (usually 20-90 s) and use the user's Grok Bot quota: put related questions into ONE detailed query instead of many small ones.
+const INSTRUCTIONS = `xscout researches X (Twitter) through the user's own Grok Bot, using its built-in public X access.
+- Calls are slow (usually 1-5 minutes) and use the user's Grok Bot quota: put related questions into ONE detailed query instead of many small ones.
 - Results contain a synthesized answer plus source post URLs. Cite those URLs; do not invent posts.
 - If x_research returns a pending run_id, call x_research_result with that run_id to keep waiting.`;
 
@@ -41,7 +41,7 @@ function progressReporter(extra: Extra): ((elapsedSec: number) => void) | undefi
     extra
       .sendNotification({
         method: "notifications/progress",
-        params: { progressToken: token, progress: Math.round(elapsedSec), message: `XScout researching on X... ${Math.round(elapsedSec)}s` },
+        params: { progressToken: token, progress: Math.round(elapsedSec), message: `Grok Bot researching on X... ${Math.round(elapsedSec)}s` },
       })
       .catch(() => {});
   };
@@ -70,7 +70,7 @@ server.registerTool(
     description:
       "Search and read X (Twitter) posts through the user's Grok Bot and get back a synthesized answer with cited source posts (URL, author, time, text, engagement). " +
       "Good for: what people are saying about a topic or product, finding posts or threads by an account, reading a specific X post or thread by URL, launch and announcement reactions, expert opinions, trends. " +
-      "Slow: usually 20-90 s, so ask one detailed question. If it is not finished within wait_seconds, you get a run_id; call x_research_result to continue.",
+      "Slow: usually 1-5 minutes, so ask one detailed question. If it is not finished within wait_seconds, you get a run_id; call x_research_result to continue.",
     inputSchema: {
       query: z
         .string()

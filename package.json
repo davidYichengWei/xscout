@@ -5,6 +5,25 @@
   "type": "module",
   "private": true,
   "license": "MIT",
+  "author": "David Wei <davidwei319@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidYichengWei/xscout.git"
+  },
+  "homepage": "https://github.com/davidYichengWei/xscout#readme",
+  "bugs": "https://github.com/davidYichengWei/xscout/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "grok",
+    "grok-bot",
+    "x",
+    "twitter",
+    "claude-code",
+    "codex",
+    "cursor",
+    "ai-agents"
+  ],
   "engines": {
     "node": ">=23.6"
   },

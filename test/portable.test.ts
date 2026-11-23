@@ -63,8 +63,11 @@ test("fetch goes through HTTP(S)_PROXY when one is set", async () => {
       const on = enableEnvProxy();
       const t = await (await fetch("http://127.0.0.1:${originPort}/x")).text();
       process.stdout.write(JSON.stringify({ on, t }));`;
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of ["HTTPS_PROXY", "https_proxy", "http_proxy", "ALL_PROXY", "all_proxy", "no_proxy"]) delete env[k];
+    Object.assign(env, { HTTP_PROXY: `http://127.0.0.1:${proxyPort}`, NO_PROXY: "" });
     const out = await new Promise<string>((resolve, reject) => {
-      execFile(process.execPath, ["--input-type=module", "-e", code], { cwd: root, env: { ...process.env, HTTP_PROXY: `http://127.0.0.1:${proxyPort}`, NO_PROXY: "" } }, (err, stdout) =>
+      execFile(process.execPath, ["--input-type=module", "-e", code], { cwd: root, env }, (err, stdout) =>
         err ? reject(err) : resolve(stdout),
       );
     });
@@ -81,4 +84,37 @@ test("codex config pins proxy env in a sub-table", async () => {
   const out = upsertCodexToml("", { command: "/node", args: ["/s.ts"], env: { HTTPS_PROXY: "http://127.0.0.1:18791" } });
   assert.match(out, /\[mcp_servers\.xscout\]\n[\s\S]*tool_timeout_sec = 300\n\n\[mcp_servers\.xscout\.env\]\nHTTPS_PROXY = "http:\/\/127\.0\.0\.1:18791"\n/);
   assert.equal(upsertCodexToml(out, { command: "/node", args: ["/s.ts"] }).includes("HTTPS_PROXY"), false);
+});
+
+test("serverSpec pins proxy env only when asked", async () => {
+  const { serverSpec } = await import("../src/agents.ts");
+  const saved = process.env.HTTPS_PROXY;
+  process.env.HTTPS_PROXY = "http://127.0.0.1:18791";
+  try {
+    assert.equal(serverSpec().env?.HTTPS_PROXY, "http://127.0.0.1:18791");
+    assert.equal(serverSpec({ pinProxy: false }).env, undefined);
+  } finally {
+    if (saved === undefined) delete process.env.HTTPS_PROXY;
+    else process.env.HTTPS_PROXY = saved;
+  }
+});
+
+test("claude config file follows CLAUDE_CONFIG_DIR", async () => {
+  const { claudeConfigFile } = await import("../src/agents.ts");
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = "/tmp/claude-cfg";
+  try {
+    assert.equal(claudeConfigFile(), "/tmp/claude-cfg/.claude.json");
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved;
+  }
+});
+
+test("create-routine message embeds the rendered instructions", async () => {
+  const { renderCreateRoutineMessage, renderRoutineInstructions } = await import("../src/routine.ts");
+  const vars = { githubRepo: "someone/inbox", githubBranch: "main", resultsDir: "results" };
+  const message = renderCreateRoutineMessage(vars);
+  assert.ok(message.includes(`===== BEGIN ROUTINE INSTRUCTIONS =====\n${renderRoutineInstructions(vars).trimEnd()}\n===== END ROUTINE INSTRUCTIONS =====`));
+  assert.doesNotMatch(message, /\{\{[A-Z_]+\}\}/);
 });

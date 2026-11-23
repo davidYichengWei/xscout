@@ -16,7 +16,7 @@ import { triggerWebhook } from "./webhook.ts";
 
 export const DEFAULT_WAIT_SECONDS = Number(process.env.XSCOUT_DEFAULT_WAIT ?? 45);
 
-/** The JSON body the XScout routine receives. Keep in sync with routine/INSTRUCTIONS.template.md. */
+/** The JSON body the xscout routine receives. Keep in sync with routine/INSTRUCTIONS.template.md. */
 export function buildPayload(run: RunRecord, cfg: XscoutConfig) {
   const p = run.params;
   return {
@@ -141,13 +141,13 @@ export function formatOutcome(outcome: WaitOutcome): string {
   const lines: string[] = [];
   if (outcome.stale) {
     lines.push(
-      `XScout has not delivered a result for run_id "${run.runId}" after ${Math.round(elapsedSec / 60)} minutes.`,
+      `Grok Bot has not delivered a result for run_id "${run.runId}" after ${Math.round(elapsedSec / 60)} minutes.`,
       "The routine run may be stuck (for example on an approval card in the Grok Bot app) or may have failed.",
-      `Ask the user to check the XScout routine run in Grok Bot. You may keep polling with x_research_result({"run_id": "${run.runId}"}) or start a new x_research.`,
+      `Ask the user to check the xscout routine run in Grok Bot. You may keep polling with x_research_result({"run_id": "${run.runId}"}) or start a new x_research.`,
     );
   } else {
     lines.push(
-      `XScout is still researching on X (run_id "${run.runId}", ${Math.round(elapsedSec)}s elapsed; runs usually take 20-90s, sometimes longer).`,
+      `Grok Bot is still researching on X (run_id "${run.runId}", ${Math.round(elapsedSec)}s elapsed; runs usually take 1-5 minutes).`,
       `Call x_research_result({"run_id": "${run.runId}"}) to keep waiting. Do other useful work in between if you can.`,
     );
   }

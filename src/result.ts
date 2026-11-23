@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Contract between the XScout routine (writer) and this client (reader). Keep in sync with routine/INSTRUCTIONS.template.md. */
+/** Contract between the xscout routine (writer) and this client (reader). Keep in sync with routine/INSTRUCTIONS.template.md. */
 const Metrics = z.looseObject({
   likes: z.number().nullish(),
   reposts: z.number().nullish(),
@@ -82,7 +82,7 @@ function formatPost(p: XscoutPost, i: number): string {
 export function formatResultMarkdown(r: XscoutResult, query: string, elapsedSec?: number): string {
   const out: string[] = [];
   if (r.status === "error") {
-    out.push(`XScout could not finish this research: ${r.error ?? "unknown error"}`);
+    out.push(`Grok Bot could not finish this research: ${r.error ?? "unknown error"}`);
   }
   out.push(`## X research: ${query}`, "");
   if (r.answer_markdown?.trim()) out.push(r.answer_markdown.trim(), "");
@@ -91,6 +91,6 @@ export function formatResultMarkdown(r: XscoutResult, query: string, elapsedSec?
   out.push(posts.length ? posts.map(formatPost).join("\n\n") : "_No posts returned._", "");
   if (r.coverage_notes?.trim()) out.push(`### Coverage notes`, "", r.coverage_notes.trim(), "");
   if (r.searches?.length) out.push(`_Searches run: ${r.searches.map((s) => `\`${s}\``).join(", ")}_`);
-  out.push(`_run_id: ${r.run_id}${elapsedSec !== undefined ? ` · ${Math.round(elapsedSec)}s` : ""} · via Grok Bot XScout_`);
+  out.push(`_run_id: ${r.run_id}${elapsedSec !== undefined ? ` · ${Math.round(elapsedSec)}s` : ""} · via Grok Bot (xscout)_`);
   return out.join("\n");
 }

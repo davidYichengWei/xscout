@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""XScout result delivery (runs on the Grok Bot cloud computer).
+"""xscout result delivery (runs on the Grok Bot cloud computer).
 
 Usage: python3 deliver.py <run_id> <result_path> <result_json_file>
 Needs env XSCOUT_GITHUB_TOKEN (fine-grained token: Contents read/write on {{REPO}} only).

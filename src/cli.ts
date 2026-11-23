@@ -3,11 +3,11 @@ import { enableEnvProxy } from "./net.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AGENT_IDS, installAgent, serverSpec, type AgentId } from "./agents.ts";
+import { AGENT_IDS, claudeConfigFile, installAgent, serverSpec, type AgentId } from "./agents.ts";
 import { configPath, loadConfig, readStoredConfig, requireConfig, saveStoredConfig, VERSION, xscoutHome } from "./config.ts";
 import { formatOutcome, startResearch, waitForResult } from "./core.ts";
 import { getRepoInfo } from "./github.ts";
-import { renderRoutineInstructions } from "./routine.ts";
+import { renderCreateRoutineMessage, renderRoutineInstructions } from "./routine.ts";
 import { listRuns, loadResultCache } from "./runs.ts";
 import {
   getSecret,
@@ -23,7 +23,7 @@ import {
 
 enableEnvProxy();
 
-const BOOL_FLAGS = new Set(["json", "dry-run", "print", "help"]);
+const BOOL_FLAGS = new Set(["json", "dry-run", "print", "help", "no-proxy"]);
 
 function parseArgs(args: string[]) {
   const pos: string[] = [];
@@ -50,8 +50,8 @@ Setup
   xscout secret set <webhook-secret|github-read-token> [--from-file <file>]   (else reads stdin)
   xscout secret status
   xscout secret keygen | seal <name> --pubkey <file> | unseal <name> <ciphertext>   (move a secret between machines)
-  xscout routine [--print]          Render the routine instructions to paste into Grok Bot
-  xscout install-agents [--only claude,codex,cursor,antigravity] [--dry-run]
+  xscout routine [--print]          Render the routine instructions (and a chat message that creates the routine)
+  xscout install-agents [--only claude,codex,cursor,antigravity] [--no-proxy] [--dry-run]
   xscout doctor                     Check configuration, secrets and GitHub access
 
 Use
@@ -104,7 +104,7 @@ async function doctor(): Promise<number> {
 
   console.log("agents");
   const checks: Array<[string, string]> = [
-    ["claude", join(homedir(), ".claude.json")],
+    ["claude", claudeConfigFile()],
     ["codex", join(homedir(), ".codex", "config.toml")],
     ["cursor", join(homedir(), ".cursor", "mcp.json")],
     ["antigravity", join(homedir(), ".gemini", "config", "mcp_config.json")],
@@ -148,7 +148,7 @@ async function main(): Promise<number> {
     case "secret": {
       const [sub, name] = pos;
       if (sub === "status") {
-        for (const n of SECRET_NAMES) console.log(`${n}: ${getSecret(n) ? "present" : `missing (Keychain or ${secretEnvVar(n)})`}`);
+        for (const n of SECRET_NAMES) console.log(`${n}: ${getSecret(n) ? "present" : `missing (${secretStoreDescription()} or ${secretEnvVar(n)})`}`);
         return 0;
       }
       if (sub === "keygen") {
@@ -180,16 +180,22 @@ async function main(): Promise<number> {
     case "routine": {
       const cfg = loadConfig();
       if (!cfg.githubRepo) throw new Error("Set the repo first: xscout config --repo <owner/name>");
-      const text = renderRoutineInstructions({
+      const vars = {
         githubRepo: cfg.githubRepo,
         githubBranch: cfg.githubBranch ?? "main",
         resultsDir: cfg.resultsDir ?? "results",
-      });
+      };
+      const text = renderRoutineInstructions(vars);
       mkdirSync(xscoutHome(), { recursive: true, mode: 0o700 });
       const out = join(xscoutHome(), "ROUTINE_INSTRUCTIONS.md");
       writeFileSync(out, text);
+      const message = join(xscoutHome(), "CREATE_ROUTINE_MESSAGE.md");
+      writeFileSync(message, renderCreateRoutineMessage(vars));
       if (flags.print) console.log(text);
-      else console.log(`Routine instructions written to ${out}`);
+      else {
+        console.log(`Routine instructions written to ${out}`);
+        console.log(`Chat message asking Grok Bot to create the routine written to ${message}`);
+      }
       return 0;
     }
 
@@ -197,7 +203,7 @@ async function main(): Promise<number> {
       const only = str(flags.only)?.split(",").map((s) => s.trim()) ?? [...AGENT_IDS];
       const unknown = only.filter((id) => !(AGENT_IDS as readonly string[]).includes(id));
       if (unknown.length) throw new Error(`Unknown agent(s): ${unknown.join(", ")}. Known: ${AGENT_IDS.join(", ")}`);
-      const spec = serverSpec();
+      const spec = serverSpec({ pinProxy: flags["no-proxy"] !== true });
       let failed = 0;
       for (const id of only as AgentId[]) {
         try {
@@ -228,7 +234,7 @@ async function main(): Promise<number> {
         language: str(flags.language),
         answerLanguage: str(flags["answer-language"]),
       });
-      process.stderr.write(`started ${run.runId}; waiting for XScout`);
+      process.stderr.write(`started ${run.runId}; waiting for Grok Bot`);
       const outcome = await waitForResult(run.runId, num(flags.wait) ?? 300, { onTick: () => process.stderr.write(".") });
       process.stderr.write("\n");
       console.log(flags.json && outcome.state === "done" ? loadResultCache(run.runId) : formatOutcome(outcome));
