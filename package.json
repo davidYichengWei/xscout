@@ -1,0 +1,29 @@
+{
+  "name": "xscout",
+  "version": "0.1.0",
+  "description": "Search X from any coding agent through your own Grok Bot (official Webhook Routine + private GitHub inbox).",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "bin": {
+    "xscout": "src/cli.ts",
+    "xscout-mcp": "src/server.ts"
+  },
+  "scripts": {
+    "mcp": "node src/server.ts",
+    "cli": "node src/cli.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
