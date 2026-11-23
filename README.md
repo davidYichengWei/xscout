@@ -7,26 +7,27 @@
 xscout is an MCP server and CLI. It lets Claude Code, Codex, Cursor and Antigravity search X, read posts and threads, and get back a synthesized answer with cited source posts. The research is done by your [Grok Bot](https://docs.x.ai/grok-bot), using its built-in public X access. You don't need an X API or xAI API key, and you pay nothing beyond your existing Grok Bot subscription.
 
 ```text
-coding agent ──MCP──▶ xscout (your machine) ──POST official webhook {run_id, query}──▶ Grok Bot routine (cloud computer, researches X)
-     ▲                                                                                        │
-     └──── polls GitHub for results/<date>/<run_id>.json ◀── commits the result JSON to your private repo ──┘
+coding agent ──MCP──▶ xscout (your machine) ──POST official webhook {run_id, query, topic, one-time key}──▶ Grok Bot routine (researches X)
+     ▲                                                                                                       │
+     └──── polls ntfy.sh/<topic>, verifies and decrypts ◀── publishes the result, encrypted with the run's key ──┘
 ```
 
-- **Official surfaces only.** xscout triggers a Grok Bot [webhook routine](https://docs.x.ai/grok-bot/skills-routines-and-automations) and reads results through the GitHub API. It doesn't depend on any undocumented Grok Bot endpoint, so app updates are unlikely to break it.
-- **Nothing to host.** Your machine only makes outbound HTTPS requests. There's no server, no open port and no tunnel. Results travel through a private GitHub repo that you own.
+- **Official surfaces only.** xscout triggers a Grok Bot [webhook routine](https://docs.x.ai/grok-bot/skills-routines-and-automations). It doesn't depend on any undocumented Grok Bot endpoint, so app updates are unlikely to break it.
+- **Nothing to host, no extra accounts.** Your machine only makes outbound HTTPS requests. Results come back through [ntfy](https://ntfy.sh), a public HTTP pub/sub service that needs no account, and they're encrypted end to end so ntfy only ever sees ciphertext.
 - **Isolated runs.** Every request is its own routine run, so runs never mix with each other or with your main Grok Bot chat, and you can run several at once.
 - **Structured results.** You get an answer plus the source posts: URL, author, time, text and engagement.
 
 ## Requirements
 
 - A Grok Bot subscription with Routines available.
-- A GitHub account. The [`gh` CLI](https://cli.github.com/) is optional but makes setup easier.
 - Node.js **23.6 or newer** on each machine that runs the agents. xscout runs its TypeScript sources directly, so there's no build step. If the machine reaches the internet through an HTTP(S) proxy, use Node **25 or newer**.
-- macOS or Linux. On macOS, secrets go into the login Keychain. On Linux, they go into `~/.xscout/secrets.json` with mode `0600`.
+- macOS or Linux. On macOS, the webhook key goes into the login Keychain. On Linux, it goes into `~/.xscout/secrets.json` with mode `0600`.
+
+That's all. A GitHub account is only needed for the [optional GitHub transport](#optional-deliver-through-a-private-github-repo).
 
 ## Setup
 
-Setup takes about 10 minutes. Steps 1 to 4 happen on your machine and on GitHub, steps 5 and 6 happen in Grok Bot, and steps 7 to 9 happen back on your machine.
+Setup takes about 5 minutes: two steps on your machine, one in Grok Bot, and two back on your machine.
 
 ### 1. Install xscout
 
@@ -39,72 +40,41 @@ alias xscout="node $PWD/src/cli.ts"   # optional; the rest of this guide uses `x
 
 The agent configs point at this folder by absolute path, so put it somewhere it can stay. If you move it later, re-run `xscout install-agents`.
 
-### 2. Create a private "inbox" repo on GitHub
-
-Grok Bot commits each result here, and xscout reads it back.
+### 2. Render the routine
 
 ```bash
-gh repo create xscout-inbox --private --add-readme
-```
-
-You can also do this on the web: create a **private** repo, check **Add a README** so the `main` branch exists, and leave everything else empty. Results include your research questions, so keep this repo private; `xscout doctor` reports a public inbox as a problem.
-
-### 3. Create GitHub tokens
-
-Go to [GitHub → Settings → Fine-grained tokens](https://github.com/settings/personal-access-tokens/new). For each token, set **Repository access** to *Only select repositories* and pick the inbox repo only.
-
-| Token | Permission | Used by |
-|---|---|---|
-| **Write token** (required) | Contents: **Read and write** | Grok Bot, to commit results |
-| **Read token** (optional) | Contents: **Read-only** | xscout on your machine, to read results |
-
-If you're logged in with `gh auth login` on the machine, you can skip the read token: xscout falls back to `gh auth token`. The write token is never stored on your machine.
-
-### 4. Configure xscout and render the routine
-
-```bash
-xscout config --repo <your-github-user>/xscout-inbox
-xscout secret set github-read-token     # optional: paste the read token, then Enter and Ctrl-D
 xscout routine
 ```
 
-`xscout routine` writes two files:
+This writes two files:
 
-- `~/.xscout/ROUTINE_INSTRUCTIONS.md`: the instructions for the Grok Bot routine, already filled in with your repo.
-- `~/.xscout/CREATE_ROUTINE_MESSAGE.md`: a chat message that asks Grok Bot to create the routine for you, with those instructions embedded.
+- `~/.xscout/CREATE_ROUTINE_MESSAGE.md`: a chat message that asks Grok Bot to create the routine for you.
+- `~/.xscout/ROUTINE_INSTRUCTIONS.md`: the routine's instructions on their own, if you'd rather create it by hand.
 
-### 5. Give Grok Bot the write token
+### 3. Create the webhook routine in Grok Bot
 
-In a Grok Bot chat, send:
+Paste the whole content of `~/.xscout/CREATE_ROUTINE_MESSAGE.md` into a Grok Bot chat (on macOS: `pbcopy < ~/.xscout/CREATE_ROUTINE_MESSAGE.md`). Grok Bot creates a routine named **xscout webhook research** with a **Webhook** trigger. When it asks, allow `python3 /tmp/xscout/deliver.py ...` and its HTTPS requests to `ntfy.sh` to run without approval: nobody watches these runs, and an approval card blocks a run until it times out.
 
-> Please save a secret named `XSCOUT_GITHUB_TOKEN` for me. I'll paste the value into the secure secret card.
-
-When the secret card appears, paste the **write token** and choose **Save securely**. Don't paste the token as a normal chat message.
-
-### 6. Create the webhook routine
-
-The easiest way is to paste the whole content of `~/.xscout/CREATE_ROUTINE_MESSAGE.md` into the Grok Bot chat and let it create the routine. You can also create it yourself:
-
-1. Create a new **Routine** with the trigger set to **Webhook**.
-2. Paste the full content of `~/.xscout/ROUTINE_INSTRUCTIONS.md` into **Instructions**, unchanged. It contains a small Python script that has to stay byte-for-byte identical.
-3. Make sure routine runs can read the `XSCOUT_GITHUB_TOKEN` secret, and that running `python3 /tmp/xscout/deliver.py ...` with its requests to `api.github.com` doesn't need manual approval. Nobody watches these runs, and an approval card blocks the run until it times out.
+To create it by hand instead: make a new Routine with the trigger set to **Webhook**, paste `~/.xscout/ROUTINE_INSTRUCTIONS.md` into **Instructions** unchanged (it contains a small Python script that has to stay byte-for-byte identical), and set up the same approval rule.
 
 Then copy the routine's **webhook URL** and its **key** from the routine's trigger settings in the Grok Bot app. The key is either a `whsec_…` signing secret or a `crsr_…` Bearer key; both work. Never paste the key into a chat.
 
-### 7. Connect xscout to the routine
+### 4. Connect xscout to the routine
 
 ```bash
 xscout config --webhook-url 'https://…the webhook URL…'
 xscout secret set webhook-secret        # paste the key, then Enter and Ctrl-D
 ```
 
-### 8. Register the MCP server with your agents
+### 5. Register the MCP server with your agents, then try it
 
 ```bash
 xscout install-agents                   # or: --only claude,codex
+xscout doctor
+xscout ask "What has @AnthropicAI posted on X in the past 3 days? Link the main announcements." --max-posts 5
 ```
 
-This adds an `xscout` MCP server to each agent's config:
+`install-agents` adds an `xscout` MCP server to each agent's config:
 
 | Agent | Config |
 |---|---|
@@ -115,14 +85,7 @@ This adds an `xscout` MCP server to each agent's config:
 
 Each existing file is backed up next to itself (`*.xscout-backup-<time>`) before it's changed. Restart the agents, or open a new session, to load the server. For any other MCP client, `xscout mcp-spec` prints the command to configure by hand.
 
-### 9. Check and try it
-
-```bash
-xscout doctor
-xscout ask "What are people on X saying about the latest Claude release? Give 5 representative posts." --since 2026-11-01
-```
-
-`doctor` checks the config, the secrets, access to the inbox repo and the agent registrations. The first `ask` usually takes 1 to 5 minutes. After that, ask your agent something like *"Search X for reactions to …"* and it will call xscout.
+`doctor` checks the config, the webhook key, that the ntfy server is reachable, and the agent registrations. The first `ask` usually takes 1 to 5 minutes. After that, ask your agent something like *"Search X for reactions to …"* and it will call xscout.
 
 ## Using xscout from agents
 
@@ -144,13 +107,45 @@ xscout doctor
 xscout --help
 ```
 
+## How results get back to you
+
+For every run, xscout generates a random ntfy topic (`xs_` plus 24 random characters) and a one-time 32-byte key, and sends both to the routine in the webhook request. Nothing else ever learns them.
+
+When the research is done, the routine's `deliver.py` compresses the result, encrypts it with that key, and publishes it to the topic as an ntfy attachment. The encryption uses only the Python standard library: HMAC-SHA256 in counter mode for the keystream, then an HMAC-SHA256 tag over the run ID, nonce and ciphertext (encrypt-then-MAC). xscout polls the topic, checks the tag, decrypts, and caches the result in `~/.xscout/runs/`.
+
+What ntfy can see: the topic name, the run ID (used as the file name), the time, and the size of the ciphertext. It can't read your question or the answer. On ntfy.sh, messages are kept for 12 hours and attachments for 3 hours; xscout caches each result after the first read, so this only matters if nobody collects a result for 3 hours.
+
+To use your own ntfy server instead of ntfy.sh:
+
+```bash
+xscout config --ntfy-server https://ntfy.example.com
+xscout routine        # then update the routine's instructions in Grok Bot
+```
+
+## Optional: deliver through a private GitHub repo
+
+If you'd rather keep results in a repo you own, permanently, xscout can have the routine commit them to a private GitHub repo instead.
+
+1. Create a **private** repo with a README, for example `gh repo create xscout-inbox --private --add-readme`.
+2. At [GitHub → Settings → Fine-grained tokens](https://github.com/settings/personal-access-tokens/new), create a token limited to that repo with **Contents: Read and write**. This is the routine's write token. A read-only token for your machine is optional: if you're logged in with `gh auth login`, xscout uses `gh auth token`.
+3. In a Grok Bot chat, ask it to save a secret named `XSCOUT_GITHUB_TOKEN`, and paste the write token into the secure secret card (choose **Save securely**).
+4. Switch xscout over and re-render the routine:
+
+   ```bash
+   xscout config --transport github --repo <your-github-user>/xscout-inbox
+   xscout secret set github-read-token   # optional
+   xscout routine
+   ```
+
+5. Paste the new `~/.xscout/CREATE_ROUTINE_MESSAGE.md` into Grok Bot so it updates the routine. A routine rendered with a repo accepts both ntfy and GitHub delivery, so machines on either transport keep working.
+
 ## Using more machines
 
-Every machine runs its own xscout but shares the same routine and inbox repo. On the new machine:
+Every machine runs its own xscout but shares the same routine. On the new machine:
 
 ```bash
 git clone https://github.com/davidYichengWei/xscout.git && cd xscout && npm ci
-node src/cli.ts config --repo <your-github-user>/xscout-inbox --webhook-url '<the same webhook URL>'
+node src/cli.ts config --webhook-url '<the same webhook URL>'
 node src/cli.ts secret keygen > /tmp/xscout.pub     # prints a one-time public key
 ```
 
@@ -168,13 +163,13 @@ node src/cli.ts install-agents
 node src/cli.ts doctor
 ```
 
-The key only travels encrypted with RSA-OAEP, and the one-time key pair is deleted after `unseal`. For the read token, run `gh auth login` on the new machine or move `github-read-token` the same way.
+The key only travels encrypted with RSA-OAEP, and the one-time key pair is deleted after `unseal`. On the GitHub transport, also set `--transport github --repo …` on the new machine, and run `gh auth login` there or move `github-read-token` the same way.
 
 ## Proxies
 
 If `HTTPS_PROXY` or `HTTP_PROXY` is set, xscout turns on Node's built-in proxy support (Node 25 or newer). Some agents, such as Codex, don't pass their environment to MCP servers, so by default `install-agents` copies the current proxy variables into each agent's xscout config.
 
-If your machine can reach `api.github.com` and the webhook host directly, and the proxy is slow, register without them:
+If your machine can reach the webhook host and ntfy directly, and the proxy is slow, register without them:
 
 ```bash
 env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy -u ALL_PROXY -u all_proxy xscout install-agents --no-proxy
@@ -182,41 +177,42 @@ env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy -u ALL_PROXY -u al
 
 ## Limits and costs
 
-- **Speed.** A run usually takes 1 to 5 minutes. Most of that is Grok Bot running several X searches one after another; delivery and polling add about 30 seconds. Narrow questions are faster: name the accounts, the time range, and how many posts you need.
+- **Speed.** A run usually takes 1 to 5 minutes. Most of that is Grok Bot running several X searches one after another; delivery and polling add about 15 seconds. Narrow questions are faster: name the accounts, the time range, and how many posts you need.
 - **Quota.** Each run uses your Grok Bot usage quota. Put related questions into one detailed query.
-- **Rate limits.** Grok Bot caps webhook-triggered routine runs. At the time of writing, the cap is 200 per hour for one routine and 300 per hour across all routines.
+- **Rate limits.** Grok Bot caps webhook-triggered routine runs. At the time of writing, the cap is 200 per hour for one routine and 300 per hour across all routines. ntfy.sh also rate-limits anonymous use, far above what xscout needs.
 - **What it can read.** Only public X content. xscout and the routine never post, like, follow or DM.
 
 ## Security
 
-- The inbox repo must be private, and `doctor` checks this. Each token is scoped to that one repo.
-- The routine delivers only to the repo baked into its instructions and ignores any other destination named in a request.
+- Results are encrypted end to end with a fresh key per run, and xscout rejects anything that fails authentication.
+- The routine only delivers to the ntfy server (and, if configured, the GitHub repo) baked into its instructions, and ignores any other destination named in a request.
 - The routine treats posts, linked pages and the query itself as untrusted data, and it ignores instructions found there.
-- The webhook key and read token stay in the macOS Keychain or in a `0600` file. Environment variables `XSCOUT_WEBHOOK_SECRET` and `XSCOUT_GITHUB_TOKEN` override them.
-- Local state (config, run records, cached results) lives in `~/.xscout/`. Set `XSCOUT_HOME` to move it.
+- The webhook key stays in the macOS Keychain or in a `0600` file. The environment variable `XSCOUT_WEBHOOK_SECRET` overrides it.
+- Local state (config, run records with their one-time keys, cached results) lives in `~/.xscout/` with private file permissions. Set `XSCOUT_HOME` to move it.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| A run stays pending for a long time | Open the routine run in the Grok Bot app. It's often waiting on an approval card; allow `deliver.py` to run unattended (see step 6). |
+| A run stays pending for a long time | Open the routine run in the Grok Bot app. It's often waiting on an approval card; allow `deliver.py` to run unattended (see step 3). |
 | `Grok Bot webhook returned HTTP 401` (or 403) | Wrong webhook key. Re-run `xscout secret set webhook-secret`. |
-| `XSCOUT_DELIVERY_FAILED: GitHub HTTP 404` in the routine run | The write token can't access the inbox repo, or the repo name in the routine is wrong. |
+| `result failed authentication` | The routine didn't copy the run's key exactly. Run the query again; if it keeps happening, re-paste the routine instructions. |
+| `XSCOUT_DELIVERY_FAILED: delivery.url must be …` in the routine run | The routine's instructions were rendered for a different ntfy server. Run `xscout routine` and update the routine. |
 | `doctor` says an agent isn't registered | Run `xscout install-agents --only <agent>` and restart that agent. |
 | Requests hang behind a proxy | Use Node 25 or newer, or register with `--no-proxy` if direct access works. |
 
 ## Development
 
 ```bash
-npm test            # end-to-end tests: a local mock webhook and GitHub API, plus the rendered deliver.py run for real
+npm test            # end-to-end tests: local mock webhook, ntfy and GitHub APIs, plus the rendered deliver.py run for real
 npm run typecheck
 ```
 
-The webhook payload and the result format are the contract between `src/core.ts`, `src/result.ts` and `routine/INSTRUCTIONS.template.md`. Change them together.
+The webhook payload and the result format are the contract between `src/core.ts`, `src/result.ts` and `routine/INSTRUCTIONS.template.md`, and the encryption in `src/seal.ts` must match `seal()` in `routine/deliver.template.py` byte for byte. Change them together.
 
 ## Disclaimer
 
-xscout is an independent project. It isn't affiliated with or endorsed by xAI, X Corp. or Cursor. Use it in line with the terms of the services it touches.
+xscout is an independent project. It isn't affiliated with or endorsed by xAI, X Corp., Cursor or ntfy. Use it in line with the terms of the services it touches.
 
 ## License
 
