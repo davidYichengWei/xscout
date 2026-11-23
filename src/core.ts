@@ -1,5 +1,7 @@
 import { requireConfig, type XscoutConfig } from "./config.ts";
 import { readRepoFile } from "./github.ts";
+import { newNtfyTopic, readNtfyResult } from "./ntfy.ts";
+import { newSealKey, SealError } from "./seal.ts";
 import { formatResultMarkdown, parseResult, type XscoutResult } from "./result.ts";
 import {
   loadResultCache,
@@ -30,7 +32,9 @@ export function buildPayload(run: RunRecord, cfg: XscoutConfig) {
       language: p.language ?? null,
       answer_language: p.answerLanguage ?? null,
     },
-    delivery: { type: "github", repo: cfg.githubRepo, branch: cfg.githubBranch, path: run.resultPath },
+    delivery: run.ntfy
+      ? { type: "ntfy", url: `${run.ntfy.server}/${run.ntfy.topic}`, key: run.ntfy.key }
+      : { type: "github", repo: cfg.githubRepo, branch: cfg.githubBranch, path: run.resultPath },
     requested_at: run.createdAt,
   };
 }
@@ -40,12 +44,15 @@ export async function startResearch(params: ResearchParams): Promise<RunRecord> 
   if (!query) throw new Error("query must not be empty");
   const cfg = requireConfig();
   const secret = requireSecret("webhook-secret");
-  requireSecret("github-read-token"); // fail before spending a Grok Bot run we could never read back
+  // fail before spending a Grok Bot run we could never read back
+  if (cfg.transport === "github") requireSecret("github-read-token");
   const runId = newRunId();
   const run: RunRecord = {
     runId,
     params: { ...params, query },
-    resultPath: resultPathFor(cfg.resultsDir, runId),
+    ...(cfg.transport === "ntfy"
+      ? { ntfy: { server: cfg.ntfyServer, topic: newNtfyTopic(), key: newSealKey() } }
+      : { resultPath: resultPathFor(cfg.resultsDir, runId) }),
     createdAt: new Date().toISOString(),
     status: "pending",
   };
@@ -94,7 +101,9 @@ export async function waitForResult(runId: string, waitSeconds: number, opts: Wa
     throw new Error(`Run ${runId} never started: ${run.error}`);
   }
   const cfg = requireConfig();
-  const token = requireSecret("github-read-token");
+  const token = run.ntfy || loadResultCache(runId) !== undefined ? undefined : requireSecret("github-read-token");
+  const fetchDelivered = () =>
+    run.ntfy ? readNtfyResult(run.ntfy, runId) : readRepoFile(cfg, token!, run.resultPath ?? resultPathFor(cfg.resultsDir, runId));
   const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
   let warning: string | undefined;
 
@@ -103,11 +112,11 @@ export async function waitForResult(runId: string, waitSeconds: number, opts: Wa
     let raw: string | null | undefined = cached;
     if (raw === undefined) {
       try {
-        raw = await readRepoFile(cfg, token, run.resultPath);
+        raw = await fetchDelivered();
         warning = undefined;
       } catch (err) {
         const msg = (err as Error).message;
-        if (/HTTP 40[13]/.test(msg)) throw err; // auth problems will not fix themselves
+        if (err instanceof SealError || /HTTP 40[13]/.test(msg)) throw err; // will not fix themselves
         warning = msg; // transient network / 5xx: keep polling
         raw = null;
       }

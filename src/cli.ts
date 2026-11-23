@@ -4,7 +4,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENT_IDS, claudeConfigFile, installAgent, serverSpec, type AgentId } from "./agents.ts";
-import { configPath, loadConfig, readStoredConfig, requireConfig, saveStoredConfig, VERSION, xscoutHome } from "./config.ts";
+import {
+  configPath,
+  DEFAULT_NTFY_SERVER,
+  loadConfig,
+  readStoredConfig,
+  requireConfig,
+  saveStoredConfig,
+  VERSION,
+  xscoutHome,
+  type Transport,
+} from "./config.ts";
+import { checkNtfyServer } from "./ntfy.ts";
 import { formatOutcome, startResearch, waitForResult } from "./core.ts";
 import { getRepoInfo } from "./github.ts";
 import { renderCreateRoutineMessage, renderRoutineInstructions } from "./routine.ts";
@@ -46,7 +57,8 @@ const num = (v: string | true | undefined) => (typeof v === "string" ? Number(v)
 const HELP = `xscout ${VERSION}: search X from any coding agent through your Grok Bot.
 
 Setup
-  xscout config --repo <owner/name> --webhook-url <url> [--branch main] [--results-dir results]
+  xscout config --webhook-url <url> [--transport ntfy|github] [--ntfy-server https://ntfy.sh]
+                [--repo <owner/name>] [--branch main] [--results-dir results]   (GitHub transport)
   xscout secret set <webhook-secret|github-read-token> [--from-file <file>]   (else reads stdin)
   xscout secret status
   xscout secret keygen | seal <name> --pubkey <file> | unseal <name> <ciphertext>   (move a secret between machines)
@@ -79,28 +91,35 @@ async function doctor(): Promise<number> {
   let failures = 0;
   const cfg = loadConfig();
   console.log(`config (${configPath()})`);
+  const github = cfg.transport === "github";
   cfg.webhookUrl ? ok(`webhookUrl ${cfg.webhookUrl.replace(/(.{40}).+/, "$1…")}`) : (failures++, bad("webhookUrl missing"));
-  cfg.githubRepo ? ok(`githubRepo ${cfg.githubRepo} @ ${cfg.githubBranch}, dir ${cfg.resultsDir}/`) : (failures++, bad("githubRepo missing"));
+  ok(`transport ${cfg.transport}${github ? "" : ` via ${cfg.ntfyServer} (results end-to-end encrypted)`}`);
+  if (github) {
+    cfg.githubRepo ? ok(`githubRepo ${cfg.githubRepo} @ ${cfg.githubBranch}, dir ${cfg.resultsDir}/`) : (failures++, bad("githubRepo missing"));
+  }
 
   console.log(`secrets (${secretStoreDescription()}, or env)`);
   const webhookSecret = getSecret("webhook-secret");
   webhookSecret
     ? ok(`webhook-secret present (${webhookSecret.startsWith("whsec_") ? "Standard Webhooks signing" : "Bearer key"})`)
     : (failures++, bad("webhook-secret missing"));
-  const token = getSecret("github-read-token");
-  token ? ok("github-read-token present") : (failures++, bad("github-read-token missing"));
+  const token = github ? getSecret("github-read-token") : undefined;
+  if (github) token ? ok("github-read-token present") : (failures++, bad("github-read-token missing"));
 
-  console.log("github");
-  if (cfg.githubRepo && token) {
-    try {
+  console.log(github ? "github" : "ntfy");
+  try {
+    if (!github) {
+      await checkNtfyServer(cfg.ntfyServer!);
+      ok(`${cfg.ntfyServer} reachable`);
+    } else if (cfg.githubRepo && token) {
       const info = await getRepoInfo(cfg as ReturnType<typeof requireConfig>, token);
       info.private ? ok(`${info.fullName} reachable and private`) : (failures++, bad(`${info.fullName} is PUBLIC: make it private`));
       if (info.defaultBranch !== cfg.githubBranch) bad(`default branch is "${info.defaultBranch}" but xscout uses "${cfg.githubBranch}"`);
-    } catch (err) {
-      failures++;
-      bad((err as Error).message);
-    }
-  } else bad("skipped (needs githubRepo and github-read-token)");
+    } else bad("skipped (needs githubRepo and github-read-token)");
+  } catch (err) {
+    failures++;
+    bad((err as Error).message);
+  }
 
   console.log("agents");
   const checks: Array<[string, string]> = [
@@ -136,6 +155,8 @@ async function main(): Promise<number> {
     case "config": {
       const patch = {
         ...(str(flags["webhook-url"]) && { webhookUrl: str(flags["webhook-url"]) }),
+        ...(str(flags.transport) && { transport: str(flags.transport) as Transport }),
+        ...(str(flags["ntfy-server"]) && { ntfyServer: str(flags["ntfy-server"])!.replace(/\/+$/, "") }),
         ...(str(flags.repo) && { githubRepo: str(flags.repo) }),
         ...(str(flags.branch) && { githubBranch: str(flags.branch) }),
         ...(str(flags["results-dir"]) && { resultsDir: str(flags["results-dir"]) }),
@@ -179,8 +200,9 @@ async function main(): Promise<number> {
 
     case "routine": {
       const cfg = loadConfig();
-      if (!cfg.githubRepo) throw new Error("Set the repo first: xscout config --repo <owner/name>");
+      if (cfg.transport === "github" && !cfg.githubRepo) throw new Error("Set the repo first: xscout config --repo <owner/name>");
       const vars = {
+        ntfyServer: cfg.ntfyServer ?? DEFAULT_NTFY_SERVER,
         githubRepo: cfg.githubRepo,
         githubBranch: cfg.githubBranch ?? "main",
         resultsDir: cfg.resultsDir ?? "results",

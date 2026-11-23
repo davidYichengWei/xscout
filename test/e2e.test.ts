@@ -1,7 +1,8 @@
 /**
- * End-to-end test with a local fake of both remote sides:
+ * End-to-end test with a local fake of every remote side:
  *  - the Grok Bot webhook (verifies auth, then "researches" and runs the real rendered deliver.py)
  *  - the GitHub contents API (accepts PUTs from deliver.py, serves reads to xscout)
+ *  - an ntfy server (accepts PUT attachments from deliver.py, serves polls and downloads to xscout)
  */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -23,10 +24,12 @@ const BEARER = "crsr_test_bearer";
 
 const home = mkdtempSync(join(tmpdir(), "xscout-test-"));
 const files = new Map<string, { content: Buffer; sha: string }>();
+const ntfyMessages = new Map<string, Array<{ id: string; body: Buffer; filename?: string }>>();
 const received: any[] = [];
 let botDelayMs = 300;
-let botMode: "ok" | "silent" | "bad-json" = "ok";
+let botMode: "ok" | "silent" | "bad-json" | "wrong-key" = "ok";
 let port = 0;
+const ntfyServer = () => `http://127.0.0.1:${port}`;
 
 function body(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve) => {
@@ -52,7 +55,11 @@ async function fakeBot(payload: any) {
   if (botMode === "silent") return;
   const { renderDeliverScript } = await import("../src/routine.ts");
   const script = join(home, "deliver.py");
-  writeFileSync(script, renderDeliverScript({ githubRepo: REPO, githubBranch: "main", resultsDir: "results" }));
+  writeFileSync(script, renderDeliverScript({ ntfyServer: ntfyServer(), githubRepo: REPO, githubBranch: "main", resultsDir: "results" }));
+  const request = structuredClone(payload);
+  if (botMode === "wrong-key") request.delivery.key = request.delivery.key.replace(/^./, (c: string) => (c === "A" ? "B" : "A"));
+  const requestFile = join(home, `${payload.run_id}.request.json`);
+  writeFileSync(requestFile, JSON.stringify(request));
   const result =
     botMode === "bad-json"
       ? { xscout_result: 1, run_id: payload.run_id, status: "maybe" }
@@ -81,10 +88,10 @@ async function fakeBot(payload: any) {
   await new Promise<void>((resolve) => {
     execFile(
       "python3",
-      [script, payload.run_id, payload.delivery.path, resultFile],
+      [script, requestFile, resultFile],
       { env: { ...process.env, XSCOUT_GITHUB_TOKEN: WRITE_TOKEN, XSCOUT_GITHUB_API: `http://127.0.0.1:${port}` } },
       (err, stdout, stderr) => {
-        if (botMode === "ok") assert.ok(!err && stdout.includes("XSCOUT_DELIVERED"), `deliver.py failed: ${stderr}`);
+        if (botMode === "ok" || botMode === "wrong-key") assert.ok(!err && stdout.includes("XSCOUT_DELIVERED"), `deliver.py failed: ${stderr}`);
         resolve();
       },
     );
@@ -101,6 +108,33 @@ async function handler(req: IncomingMessage, res: ServerResponse) {
     res.writeHead(200).end("{}");
     void fakeBot(payload);
     return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/health") {
+    return res.writeHead(200, { "content-type": "application/json" }).end('{"healthy":true}');
+  }
+  const topicPut = req.method === "PUT" && url.pathname.match(/^\/(xs_[A-Za-z0-9_-]{24})$/);
+  if (topicPut) {
+    const id = randomBytes(6).toString("hex");
+    const filename = req.headers.filename as string | undefined;
+    ntfyMessages.set(topicPut[1], [...(ntfyMessages.get(topicPut[1]) ?? []), { id, body: raw, filename }]);
+    return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, event: "message", topic: topicPut[1] }));
+  }
+  const topicPoll = req.method === "GET" && url.pathname.match(/^\/(xs_[A-Za-z0-9_-]{24})\/json$/);
+  if (topicPoll) {
+    assert.equal(url.searchParams.get("poll"), "1");
+    const lines = (ntfyMessages.get(topicPoll[1]) ?? []).map((m) =>
+      JSON.stringify(
+        m.filename
+          ? { id: m.id, event: "message", topic: topicPoll[1], message: "You received a file", attachment: { name: m.filename, url: `${ntfyServer()}/file/${m.id}.json` } }
+          : { id: m.id, event: "message", topic: topicPoll[1], message: m.body.toString() },
+      ),
+    );
+    return res.writeHead(200, { "content-type": "application/x-ndjson" }).end(lines.map((l) => `${l}\n`).join(""));
+  }
+  const fileGet = req.method === "GET" && url.pathname.match(/^\/file\/([0-9a-f]+)\.json$/);
+  if (fileGet) {
+    const m = [...ntfyMessages.values()].flat().find((x) => x.id === fileGet[1]);
+    return m ? res.writeHead(200).end(m.body) : res.writeHead(404).end();
   }
   const repoMatch = url.pathname === `/repos/${REPO}`;
   if (repoMatch) {
@@ -145,6 +179,7 @@ before(async () => {
     XSCOUT_GITHUB_TOKEN: READ_TOKEN,
     XSCOUT_WEBHOOK_SECRET: WHSEC,
     XSCOUT_POLL_MS: "100",
+    XSCOUT_NTFY_SERVER: ntfyServer(),
   });
 });
 
@@ -226,15 +261,87 @@ describe("core flow", () => {
   test("deliver.py rejects a path outside the expected results location", async () => {
     const { renderDeliverScript } = await import("../src/routine.ts");
     const script = join(home, "deliver-guard.py");
-    writeFileSync(script, renderDeliverScript({ githubRepo: REPO, githubBranch: "main", resultsDir: "results" }));
+    writeFileSync(script, renderDeliverScript({ ntfyServer: ntfyServer(), githubRepo: REPO, githubBranch: "main", resultsDir: "results" }));
+    const runId = "xs-20261123-000000-abcdef";
     const f = join(home, "x.json");
-    writeFileSync(f, JSON.stringify({ xscout_result: 1, run_id: "xs-20261123-000000-abcdef", status: "ok" }));
-    const err = await new Promise<string>((resolve) =>
-      execFile("python3", [script, "xs-20261123-000000-abcdef", "../../etc/passwd", f], { env: { ...process.env, XSCOUT_GITHUB_TOKEN: WRITE_TOKEN } }, (_e, _o, stderr) =>
-        resolve(stderr),
-      ),
+    writeFileSync(f, JSON.stringify({ xscout_result: 1, run_id: runId, status: "ok" }));
+    const deliver = (delivery: object) => {
+      const req = join(home, "x.request.json");
+      writeFileSync(req, JSON.stringify({ xscout: 1, run_id: runId, delivery }));
+      return new Promise<string>((resolve) =>
+        execFile("python3", [script, req, f], { env: { ...process.env, XSCOUT_GITHUB_TOKEN: WRITE_TOKEN } }, (_e, _o, stderr) => resolve(stderr)),
+      );
+    };
+    assert.match(await deliver({ type: "github", path: "../../etc/passwd" }), /XSCOUT_DELIVERY_FAILED: delivery\.path must be results\/2026-11-23\//);
+    assert.match(
+      await deliver({ type: "ntfy", url: "https://evil.example/xs_AAAAAAAAAAAAAAAAAAAAAAAA", key: "A".repeat(43) }),
+      /XSCOUT_DELIVERY_FAILED: delivery\.url must be/,
     );
-    assert.match(err, /XSCOUT_DELIVERY_FAILED: result_path must be results\/2026-11-23\//);
+    assert.match(await deliver({ type: "ntfy", url: `${ntfyServer()}/xs_AAAAAAAAAAAAAAAAAAAAAAAA`, key: "short" }), /delivery\.key must be/);
+  });
+
+  test("ntfy-only routines refuse GitHub delivery", async () => {
+    const { renderDeliverScript, renderRoutineInstructions } = await import("../src/routine.ts");
+    const vars = { ntfyServer: "https://ntfy.sh", githubBranch: "main", resultsDir: "results" };
+    assert.doesNotMatch(renderRoutineInstructions(vars).split("```python")[0], /XSCOUT_GITHUB_TOKEN|"type": "github"/);
+    const script = join(home, "deliver-ntfy-only.py");
+    writeFileSync(script, renderDeliverScript(vars));
+    const runId = "xs-20261123-000000-abcdef";
+    const f = join(home, "y.json");
+    const req = join(home, "y.request.json");
+    writeFileSync(f, JSON.stringify({ xscout_result: 1, run_id: runId, status: "ok" }));
+    writeFileSync(req, JSON.stringify({ xscout: 1, run_id: runId, delivery: { type: "github", path: "results/2026-11-23/x.json" } }));
+    const err = await new Promise<string>((resolve) => execFile("python3", [script, req, f], (_e, _o, stderr) => resolve(stderr)));
+    assert.match(err, /GitHub delivery is not enabled/);
+  });
+});
+
+describe("ntfy transport", () => {
+  before(() => {
+    process.env.XSCOUT_TRANSPORT = "ntfy";
+  });
+  after(() => {
+    delete process.env.XSCOUT_TRANSPORT;
+  });
+
+  test("routine encrypts with the per-run key; ntfy only ever sees ciphertext", async () => {
+    const { startResearch, waitForResult, formatOutcome } = await import("../src/core.ts");
+    const run = await startResearch({ query: "What do people think of Bar?" });
+    const payload = received.at(-1);
+    assert.equal(payload.delivery.type, "ntfy");
+    assert.match(payload.delivery.url, new RegExp(`^${ntfyServer()}/xs_[A-Za-z0-9_-]{24}$`));
+    assert.match(payload.delivery.key, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(payload.delivery.repo, undefined);
+    const outcome = await waitForResult(run.runId, 10);
+    assert.equal(outcome.state, "done");
+    assert.match(formatOutcome(outcome), /People like it \[1\]. Query was: What do people think of Bar\?/);
+    const topic = payload.delivery.url.split("/").pop();
+    const stored = ntfyMessages.get(topic)!;
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].filename, `${run.runId}.json`);
+    assert.doesNotMatch(stored[0].body.toString(), /People like it|someone|Bar/);
+    assert.equal(JSON.parse(stored[0].body.toString()).xscout_sealed, 1);
+  });
+
+  test("a result sealed with the wrong key fails fast instead of polling forever", async () => {
+    botMode = "wrong-key";
+    try {
+      const { startResearch, waitForResult } = await import("../src/core.ts");
+      const run = await startResearch({ query: "tampered key" });
+      await assert.rejects(waitForResult(run.runId, 10), /failed authentication/);
+    } finally {
+      botMode = "ok";
+    }
+  });
+
+  test("seal round-trips and binds the run_id", async () => {
+    const { newSealKey, openSealed, seal } = await import("../src/seal.ts");
+    const key = newSealKey();
+    const text = JSON.stringify({ hello: "世界", n: "x".repeat(10_000) });
+    const sealed = seal(text, key, "xs-20261123-000000-abcdef");
+    assert.equal(openSealed(sealed, key, "xs-20261123-000000-abcdef"), text);
+    assert.throws(() => openSealed(sealed, key, "xs-20261123-000000-000000"), /envelope is for run/);
+    assert.throws(() => openSealed(sealed, newSealKey(), "xs-20261123-000000-abcdef"), /failed authentication/);
   });
 });
 

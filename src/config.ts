@@ -12,9 +12,16 @@ export function configPath(): string {
   return join(xscoutHome(), "config.json");
 }
 
+/** How the routine sends results back: an encrypted ntfy message, or a commit to a private GitHub repo. */
+export type Transport = "ntfy" | "github";
+export const TRANSPORTS: readonly Transport[] = ["ntfy", "github"];
+export const DEFAULT_NTFY_SERVER = "https://ntfy.sh";
+
 /** Values stored in ~/.xscout/config.json. Secrets never live here (see secrets.ts). */
 export interface StoredConfig {
   webhookUrl?: string;
+  transport?: Transport;
+  ntfyServer?: string;
   githubRepo?: string;
   githubBranch?: string;
   resultsDir?: string;
@@ -22,7 +29,9 @@ export interface StoredConfig {
 
 export interface XscoutConfig {
   webhookUrl: string;
-  githubRepo: string;
+  transport: Transport;
+  ntfyServer: string;
+  githubRepo?: string;
   githubBranch: string;
   resultsDir: string;
   githubApiBase: string;
@@ -54,6 +63,12 @@ export function saveStoredConfig(patch: StoredConfig): StoredConfig {
   if (patch.webhookUrl !== undefined && !/^https:\/\//.test(patch.webhookUrl)) {
     throw new Error("webhookUrl must start with https://");
   }
+  if (patch.transport !== undefined && !TRANSPORTS.includes(patch.transport)) {
+    throw new Error(`transport must be one of ${TRANSPORTS.join(", ")}, got "${patch.transport}"`);
+  }
+  if (patch.ntfyServer !== undefined && !/^https:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(patch.ntfyServer)) {
+    throw new Error(`ntfyServer must look like "https://ntfy.example.com" (no path), got "${patch.ntfyServer}"`);
+  }
   const next = { ...readStoredConfig(), ...patch };
   mkdirSync(xscoutHome(), { recursive: true, mode: 0o700 });
   writeFileSync(configPath(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
@@ -64,9 +79,13 @@ export function saveStoredConfig(patch: StoredConfig): StoredConfig {
 export function loadConfig(): Partial<XscoutConfig> {
   const s = readStoredConfig();
   const env = process.env;
+  const githubRepo = env.XSCOUT_GITHUB_REPO ?? s.githubRepo;
   return {
     webhookUrl: env.XSCOUT_WEBHOOK_URL ?? s.webhookUrl,
-    githubRepo: env.XSCOUT_GITHUB_REPO ?? s.githubRepo,
+    // Setups from before ntfy support only have a repo configured; keep them on GitHub.
+    transport: (env.XSCOUT_TRANSPORT as Transport | undefined) ?? s.transport ?? (githubRepo ? "github" : "ntfy"),
+    ntfyServer: (env.XSCOUT_NTFY_SERVER ?? s.ntfyServer ?? DEFAULT_NTFY_SERVER).replace(/\/+$/, ""),
+    githubRepo,
     githubBranch: env.XSCOUT_GITHUB_BRANCH ?? s.githubBranch ?? "main",
     resultsDir: env.XSCOUT_RESULTS_DIR ?? s.resultsDir ?? "results",
     githubApiBase: (env.XSCOUT_GITHUB_API ?? "https://api.github.com").replace(/\/+$/, ""),
@@ -79,7 +98,7 @@ export function requireConfig(): XscoutConfig {
   const cfg = loadConfig();
   const missing: string[] = [];
   if (!cfg.webhookUrl) missing.push("webhookUrl (xscout config --webhook-url <url>)");
-  if (!cfg.githubRepo) missing.push("githubRepo (xscout config --repo <owner/name>)");
+  if (cfg.transport === "github" && !cfg.githubRepo) missing.push("githubRepo (xscout config --repo <owner/name>)");
   if (missing.length) {
     throw new Error(`xscout is not configured yet. Missing: ${missing.join("; ")}. Config file: ${configPath()}`);
   }

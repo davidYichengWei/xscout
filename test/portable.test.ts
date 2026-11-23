@@ -113,7 +113,7 @@ test("claude config file follows CLAUDE_CONFIG_DIR", async () => {
 
 test("create-routine message embeds the rendered instructions", async () => {
   const { renderCreateRoutineMessage, renderRoutineInstructions } = await import("../src/routine.ts");
-  const vars = { githubRepo: "someone/inbox", githubBranch: "main", resultsDir: "results" };
+  const vars = { ntfyServer: "https://ntfy.sh", githubRepo: "someone/inbox", githubBranch: "main", resultsDir: "results" };
   const message = renderCreateRoutineMessage(vars);
   assert.ok(message.includes(`===== BEGIN ROUTINE INSTRUCTIONS =====\n${renderRoutineInstructions(vars).trimEnd()}\n===== END ROUTINE INSTRUCTIONS =====`));
   assert.doesNotMatch(message, /\{\{[A-Z_]+\}\}/);

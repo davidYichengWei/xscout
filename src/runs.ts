@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { xscoutHome } from "./config.ts";
+import type { NtfyDelivery } from "./ntfy.ts";
 
 export interface ResearchParams {
   query: string;
@@ -17,7 +18,10 @@ export type RunStatus = "pending" | "done" | "error";
 export interface RunRecord {
   runId: string;
   params: ResearchParams;
-  resultPath: string;
+  /** GitHub transport: where the routine commits the result. */
+  resultPath?: string;
+  /** ntfy transport: where the routine publishes the sealed result, and the key to open it. */
+  ntfy?: NtfyDelivery;
   createdAt: string;
   status: RunStatus;
   completedAt?: string;
